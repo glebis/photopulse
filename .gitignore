@@ -1,0 +1,22 @@
+# Data (too large for git)
+embeddings/chroma_db/
+explorer/embeddings_2d.json
+explorer/embeddings_summary.json
+explorer/layouts.json
+explorer/photos.json
+explorer/fold_data.json
+explorer/*_data.json
+output/
+logs/
+explorer-backup/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+nohup.out
+
+# Secrets
+embeddings/.env
+
+# Chroma snapshots (large binary)
+embeddings/chroma_snapshot/

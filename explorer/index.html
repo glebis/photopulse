@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Folding Photo Explorer — 2025</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #040407; font-family: -apple-system, sans-serif; color: #fff; }
+canvas { display: block; cursor: grab; }
+canvas:active { cursor: grabbing; }
+
+#layout-buttons {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; z-index: 100;
+}
+.layout-btn {
+  background: rgba(255,255,255,0.04); border: 1px solid #333;
+  color: #555; padding: 8px 20px; border-radius: 20px;
+  font-size: 13px; cursor: pointer; transition: all 0.3s;
+  user-select: none; letter-spacing: 0.5px;
+}
+.layout-btn:hover { border-color: #666; color: #aaa; }
+.layout-btn.active { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,0.08); }
+
+#tooltip {
+  position: fixed; display: none; z-index: 200;
+  background: rgba(10,10,20,0.92); border: 1px solid #333;
+  padding: 8px 12px; border-radius: 8px; pointer-events: none;
+  font-size: 12px; line-height: 1.5; max-width: 240px;
+  backdrop-filter: blur(8px);
+}
+#tooltip .tt-date { color: #ccc; }
+#tooltip .tt-faces { color: #f59e0b; }
+#tooltip .tt-objects { color: #666; font-size: 11px; }
+
+#overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(4,4,7,0); z-index: 300;
+  display: flex; justify-content: center; align-items: center; flex-direction: column;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.35s ease, background 0.35s ease;
+}
+#overlay.active { pointer-events: auto; opacity: 1; background: rgba(4,4,7,0.92); }
+#overlay img {
+  max-width: 70vw; max-height: 65vh; border-radius: 6px;
+  transform: scale(0.7); opacity: 0;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+}
+#overlay.active img { transform: scale(1); opacity: 1; }
+#overlay img.crossfade { opacity: 0; transform: scale(0.95); transition: opacity 0.15s ease, transform 0.15s ease; }
+#overlay-meta { margin-top: 12px; font-size: 13px; color: #888; text-align: center; line-height: 1.8; }
+#overlay-meta .date { color: #ccc; font-size: 15px; }
+#overlay-meta .faces { color: #f59e0b; }
+#overlay-meta .objects { color: #555; }
+#overlay-close {
+  position: absolute; top: 20px; right: 24px; font-size: 24px;
+  color: #444; cursor: pointer; transition: color 0.2s;
+}
+#overlay-close:hover { color: #fff; }
+
+#threads-canvas {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 5; pointer-events: none;
+}
+
+#hud {
+  position: fixed; bottom: 16px; left: 16px; z-index: 100;
+  font-size: 11px; color: #333; line-height: 1.6;
+}
+#hud .key { color: #555; }
+
+.axis-label {
+  position: fixed; font-size: 10px; color: #333; letter-spacing: 1px;
+  text-transform: uppercase; z-index: 90; pointer-events: none;
+}
+#axis-x { bottom: 8px; left: 50%; transform: translateX(-50%); }
+#axis-y { top: 50%; left: 8px; transform: translateY(-50%) rotate(-90deg); transform-origin: left center; }
+
+#dive-stack {
+  position: fixed; bottom: 60px; left: 16px; z-index: 100;
+  display: flex; gap: 6px; align-items: end;
+}
+.dive-card {
+  width: 48px; height: 36px; border-radius: 4px; cursor: pointer;
+  border: 1px solid #333; overflow: hidden; transition: all 0.2s;
+  opacity: 0.6; background: #111;
+}
+.dive-card:hover { opacity: 1; border-color: #f59e0b; transform: scale(1.1); }
+.dive-card img { width: 100%; height: 100%; object-fit: cover; }
+
+#dive-indicator {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 100; font-size: 11px; color: #f59e0b; letter-spacing: 1px;
+  display: none; text-transform: uppercase;
+}
+
+#physics-panel {
+  position: fixed; top: 0; right: -320px; width: 310px; height: 100vh;
+  background: rgba(10,10,15,0.94); border-left: 1px solid #222;
+  z-index: 400; padding: 16px; overflow-y: auto;
+  transition: right 0.3s ease; backdrop-filter: blur(12px);
+}
+#physics-panel.open { right: 0; }
+#physics-panel h3 { font-size: 11px; color: #555; letter-spacing: 1px; text-transform: uppercase; margin: 14px 0 8px; }
+#physics-panel h3:first-child { margin-top: 0; }
+
+.preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 12px; }
+.preset-btn {
+  background: rgba(255,255,255,0.03); border: 1px solid #222; color: #444;
+  padding: 5px 2px; border-radius: 6px; font-size: 9px; cursor: pointer;
+  transition: all 0.2s; text-align: center; line-height: 1.2;
+}
+.preset-btn:hover { border-color: #555; color: #aaa; }
+.preset-btn.active { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,0.06); }
+
+.param-row { margin-bottom: 8px; }
+.param-label { display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-bottom: 2px; }
+.param-label .val { color: #666; font-variant-numeric: tabular-nums; }
+.param-row input[type=range] {
+  width: 100%; height: 3px; -webkit-appearance: none; background: #1a1a2e;
+  border-radius: 2px; outline: none;
+}
+.param-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  background: #f59e0b; border-radius: 50%; cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<div id="layout-buttons">
+  <div class="layout-btn active" data-layout="time">Time</div>
+  <div class="layout-btn" data-layout="place">Place</div>
+  <div class="layout-btn" data-layout="people">People</div>
+  <div class="layout-btn" data-layout="engagement">Engagement</div>
+  <div class="layout-btn" data-layout="radius">Radius</div>
+  <div class="layout-btn" data-layout="objects">Objects</div>
+  <div class="layout-btn" onclick="reflowLayout()" title="Reflow (R)" style="padding:6px 10px">&#8634;</div>
+</div>
+
+<div id="tooltip">
+  <div class="tt-date"></div>
+  <div class="tt-faces"></div>
+  <div class="tt-objects"></div>
+</div>
+
+<canvas id="threads-canvas"></canvas>
+
+<div id="overlay">
+  <div id="overlay-close" onclick="closeOverlay()">&#x2715;</div>
+  <img id="overlay-img" src="">
+  <div id="overlay-meta">
+    <div class="date" id="o-date"></div>
+    <div class="faces" id="o-faces"></div>
+    <div class="objects" id="o-objects"></div>
+  </div>
+</div>
+
+<div class="axis-label" id="axis-x"></div>
+<div class="axis-label" id="axis-y"></div>
+
+<div id="dive-stack"></div>
+<div id="dive-indicator"></div>
+
+<div id="hud">
+  <span class="key">Scroll</span> zoom &middot; <span class="key">Drag</span> pan &middot;
+  <span class="key">Click</span> select &middot; <span class="key">F</span> fold into &middot;
+  <span class="key">Esc</span> unfold &middot; <span class="key">Space</span> auto-fold &middot;
+  <span class="key">1-6</span> layouts &middot; <span class="key">R</span> reflow &middot; <span class="key">P</span> physics
+</div>
+
+<div id="physics-panel">
+  <h3>Presets</h3>
+  <div class="preset-grid" id="preset-grid"></div>
+  <h3>Physics</h3>
+  <div id="param-sliders"></div>
+</div>
+
+<script>
+const THUMB_BASE = location.port === '8081'
+  ? `http://${location.hostname}:8080`
+  : './thumbs';
+
+const CARD_AREA = 1200;
+const ANIM_DURATION = 2000;
+const FOLD_DURATION = 2200;
+const MAX_DIVE_DEPTH = 5;
+
+let canvas, ctx, threadsCanvas, threadsCtx;
+let photos = [], layouts = {};
+let objectColumns = [], objectsUnclassified = new Set();
+let currentLayout = 'time';
+let targetLayout = 'time';
+
+let viewX = 0, viewY = 0, viewScale = 1;
+let isDragging = false, dragStartX = 0, dragStartY = 0, dragViewX = 0, dragViewY = 0;
+
+let animating = false, animStart = 0;
+let animFrom = {}, animTo = {};
+let animDuration = ANIM_DURATION;
+
+let photoStates = [];
+let hoveredPhoto = null, selectedPhoto = null;
+let autoMode = false, autoTimer = null;
+let threads = [];
+
+// 4D Fold state
+let folded = false;
+let foldCenter = null; // the photo we folded into
+let foldRelated = new Set(); // IDs of related photos
+let foldConnections = []; // {id, ring, type, color}
+let diveStack = []; // stack of {centerPhotoId, savedPositions, savedView}
+let squeezeAmount = 0; // for 4D perspective squeeze during fold
+
+// ===== PHYSICS SYSTEM =====
+let panelOpen = false;
+
+const PARAMS = {
+  spacing:    { val: 1, min: 0.5, max: 3, step: 0.1, label: 'Spacing' },
+  repel:      { val: 0, min: 0, max: 1, step: 0.05, label: 'Repel Force' },
+  attract:    { val: 0, min: 0, max: 1, step: 0.05, label: 'Attract Force' },
+  photoSize:  { val: 1, min: 0.3, max: 2, step: 0.1, label: 'Photo Size' },
+  opacity:    { val: 0.82, min: 0.05, max: 1, step: 0.05, label: 'Opacity' },
+  dof:        { val: 0, min: 0, max: 1, step: 0.05, label: 'Depth of Field' },
+  speed:      { val: 2, min: 0.3, max: 5, step: 0.1, label: 'Transition Speed (s)' },
+  stiffness:  { val: 0.5, min: 0, max: 1, step: 0.05, label: 'Spring Stiffness' },
+  damping:    { val: 0.85, min: 0, max: 1, step: 0.05, label: 'Damping' },
+  gravity:    { val: 0, min: 0, max: 1, step: 0.05, label: 'Gravity' },
+  threadAlpha:{ val: 0.5, min: 0, max: 1, step: 0.05, label: 'Thread Opacity' },
+  relatedLayout:{ val: 0.5, min: 0, max: 1, step: 0.5, label: 'Related: Scatter/Grid/Orbit' },
+};
+
+// Current animated values (lerp toward PARAMS.*.val)
+const P = {};
+Object.keys(PARAMS).forEach(k => P[k] = PARAMS[k].val);
+
+const PRESETS = {
+  'Clean Grid':    { spacing: 1.5, repel: 0, attract: 0, photoSize: 1, opacity: 1, dof: 0, speed: 1, stiffness: 0.3, damping: 0.9, gravity: 0, threadAlpha: 0.5, relatedLayout: 0.5 },
+  'Nebula':        { spacing: 1, repel: 0.2, attract: 0.1, photoSize: 0.8, opacity: 0.4, dof: 0.6, speed: 3, stiffness: 0.3, damping: 0.8, gravity: 0, threadAlpha: 0.3 , relatedLayout: 0.5 },
+  'Tight Clusters':{ spacing: 0.6, repel: 0.3, attract: 0.7, photoSize: 0.7, opacity: 0.8, dof: 0.2, speed: 2, stiffness: 0.5, damping: 0.85, gravity: 0, threadAlpha: 0.4 , relatedLayout: 0.5 },
+  'Exploded View': { spacing: 3, repel: 0.8, attract: 0, photoSize: 1, opacity: 1, dof: 0, speed: 1.5, stiffness: 0.4, damping: 0.9, gravity: 0, threadAlpha: 0.5 , relatedLayout: 0.5 },
+  'Meditation':    { spacing: 1.2, repel: 0.1, attract: 0.1, photoSize: 1, opacity: 0.7, dof: 0.3, speed: 5, stiffness: 0.15, damping: 0.95, gravity: 0, threadAlpha: 0.3 , relatedLayout: 0.5 },
+  'Nervous System':{ spacing: 1, repel: 0.15, attract: 0.2, photoSize: 0.8, opacity: 0.7, dof: 0.2, speed: 2, stiffness: 0.5, damping: 0.85, gravity: 0, threadAlpha: 0.9 , relatedLayout: 0.5 },
+  'Gravity Well':  { spacing: 1, repel: 0.3, attract: 0, photoSize: 0.9, opacity: 0.8, dof: 0.1, speed: 2, stiffness: 0.5, damping: 0.8, gravity: 0.8, threadAlpha: 0.5 , relatedLayout: 0.5 },
+  'Constellation': { spacing: 2, repel: 0.1, attract: 0, photoSize: 0.4, opacity: 0.6, dof: 0.5, speed: 2, stiffness: 0.4, damping: 0.85, gravity: 0, threadAlpha: 0.9 , relatedLayout: 0.5 },
+  'Gallery Wall':  { spacing: 1.5, repel: 0, attract: 0, photoSize: 1.8, opacity: 1, dof: 0, speed: 1, stiffness: 0.3, damping: 0.9, gravity: 0, threadAlpha: 0.3 , relatedLayout: 0.5 },
+  'Storm':         { spacing: 1, repel: 0.4, attract: 0.2, photoSize: 0.8, opacity: 0.8, dof: 0.1, speed: 0.5, stiffness: 1, damping: 0, gravity: 0, threadAlpha: 0.5 , relatedLayout: 0.5 },
+  'Whisper':       { spacing: 1.5, repel: 0.05, attract: 0, photoSize: 0.35, opacity: 0.15, dof: 0.9, speed: 4, stiffness: 0.1, damping: 0.95, gravity: 0, threadAlpha: 0.2 , relatedLayout: 0.5 },
+  'Elastic':       { spacing: 1, repel: 0.2, attract: 0, photoSize: 1, opacity: 0.8, dof: 0, speed: 2, stiffness: 1, damping: 0, gravity: 0, threadAlpha: 0.5 , relatedLayout: 0.5 },
+};
+
+let activePreset = null;
+
+function buildPhysicsPanel() {
+  // Presets
+  const grid = document.getElementById('preset-grid');
+  Object.keys(PRESETS).forEach(name => {
+    const btn = document.createElement('div');
+    btn.className = 'preset-btn';
+    btn.textContent = name;
+    btn.addEventListener('click', () => applyPreset(name));
+    grid.appendChild(btn);
+  });
+
+  // Sliders
+  const container = document.getElementById('param-sliders');
+  Object.entries(PARAMS).forEach(([key, p]) => {
+    const row = document.createElement('div');
+    row.className = 'param-row';
+    row.innerHTML = `
+      <div class="param-label"><span>${p.label}</span><span class="val" id="pv-${key}">${p.val}</span></div>
+      <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.val}" id="ps-${key}">
+    `;
+    const slider = row.querySelector('input');
+    slider.addEventListener('input', () => {
+      PARAMS[key].val = parseFloat(slider.value);
+      document.getElementById(`pv-${key}`).textContent = slider.value;
+      activePreset = null;
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    });
+    container.appendChild(row);
+  });
+}
+
+function applyPreset(name) {
+  const preset = PRESETS[name];
+  if (!preset) return;
+  activePreset = name;
+
+  // Update targets
+  Object.entries(preset).forEach(([key, val]) => {
+    PARAMS[key].val = val;
+    const slider = document.getElementById(`ps-${key}`);
+    if (slider) slider.value = val;
+    const valEl = document.getElementById(`pv-${key}`);
+    if (valEl) valEl.textContent = val;
+  });
+
+  // Highlight preset button
+  document.querySelectorAll('.preset-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent === name);
+  });
+}
+
+function togglePhysicsPanel() {
+  panelOpen = !panelOpen;
+  document.getElementById('physics-panel').classList.toggle('open', panelOpen);
+}
+
+// Spatial hash for repel force
+function buildSpatialHash(states, cellSize) {
+  const hash = {};
+  states.forEach((ps, i) => {
+    const cx = Math.floor(ps.x / cellSize);
+    const cy = Math.floor(ps.y / cellSize);
+    const key = `${cx},${cy}`;
+    if (!hash[key]) hash[key] = [];
+    hash[key].push(i);
+  });
+  return hash;
+}
+
+function getNearby(hash, x, y, cellSize) {
+  const cx = Math.floor(x / cellSize);
+  const cy = Math.floor(y / cellSize);
+  const result = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const key = `${cx+dx},${cy+dy}`;
+      if (hash[key]) result.push(...hash[key]);
+    }
+  }
+  return result;
+}
+
+function applyPhysics(dt) {
+  // Lerp animated params toward targets
+  Object.keys(PARAMS).forEach(k => {
+    P[k] += (PARAMS[k].val - P[k]) * 0.08;
+  });
+
+  // Update animation duration from speed param
+  animDuration = P.speed * 1000;
+
+  const repelRadius = 3;
+  const hash = P.repel > 0.01 ? buildSpatialHash(photoStates, repelRadius) : null;
+
+  for (let i = 0; i < photoStates.length; i++) {
+    const ps = photoStates[i];
+    if (!ps.vx) { ps.vx = 0; ps.vy = 0; }
+
+    // Spring force toward target (layout position * spacing)
+    const tx = ps.targetX * P.spacing;
+    const ty = ps.targetY * P.spacing;
+    const sdx = tx - ps.x;
+    const sdy = ty - ps.y;
+    const springK = 0.02 + P.stiffness * 0.08;
+    ps.vx += sdx * springK;
+    ps.vy += sdy * springK;
+
+    // Repel from nearby photos
+    if (hash && P.repel > 0.01) {
+      const nearby = getNearby(hash, ps.x, ps.y, repelRadius);
+      for (const j of nearby) {
+        if (j === i) continue;
+        const other = photoStates[j];
+        const dx = ps.x - other.x;
+        const dy = ps.y - other.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+        if (dist < repelRadius) {
+          const force = P.repel * 0.5 / (dist * dist + 0.1);
+          ps.vx += (dx / dist) * force;
+          ps.vy += (dy / dist) * force;
+        }
+      }
+    }
+
+    // Gravity toward center
+    if (P.gravity > 0.01) {
+      ps.vx -= ps.x * P.gravity * 0.005;
+      ps.vy -= ps.y * P.gravity * 0.005;
+    }
+
+
+    // Damping
+    const damp = 1 - (P.damping * 0.15);
+    ps.vx *= damp;
+    ps.vy *= damp;
+
+    // Only apply physics when NOT in layout transition animation
+    if (!animating) {
+      ps.x += ps.vx * dt * 60;
+      ps.y += ps.vy * dt * 60;
+    }
+  }
+}
+
+const AXIS_LABELS = {
+  time: ['Day (Oct 1 \u2192 Dec 31)', 'Hour of Day (0\u201323)'],
+  place: ['Longitude', 'Latitude'],
+  people: ['Social Cluster', ''],
+  engagement: ['Photos per Day', 'Distance from Home'],
+  radius: ['Chronological (circular)', 'Distance from Home (center = home)'],
+  objects: ['Object Cluster', 'Within Cluster (chronological)'],
+};
+
+async function init() {
+  canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;top:0;left:0;z-index:10;';
+  document.body.appendChild(canvas);
+  ctx = canvas.getContext('2d');
+
+  threadsCanvas = document.getElementById('threads-canvas');
+  threadsCtx = threadsCanvas.getContext('2d');
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  const resp = await fetch('layouts.json');
+  const data = await resp.json();
+  photos = data.photos;
+  layouts = data.layouts;
+  objectColumns = data.objectColumns || [];
+  objectsUnclassified = new Set(data.objectsUnclassified || []);
+
+  const timeLayout = layouts.time;
+  photoStates = photos.map(p => {
+    const pos = timeLayout[p.id] || [0, 0];
+    return {
+      id: p.id, x: pos[0], y: pos[1],
+      targetX: pos[0], targetY: pos[1],
+      img: null, loaded: false, loading: false,
+      faces: p.faces, objects: p.objects, t: p.t,
+      lat: p.lat, lon: p.lon,
+      scale: 1, targetScale: 1,
+      alpha: 0.82, targetAlpha: 0.82,
+    };
+  });
+
+  viewX = window.innerWidth / 2;
+  viewY = window.innerHeight / 2;
+  viewScale = Math.min(window.innerWidth, window.innerHeight) / 120;
+
+  loadThumbnails();
+
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('dblclick', onDblClick);
+  canvas.addEventListener('click', onClickCanvas);
+  window.addEventListener('keydown', onKeyDown);
+
+  document.querySelectorAll('.layout-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (folded) unfoldAll();
+      switchLayout(btn.dataset.layout);
+    });
+  });
+
+  updateAxisLabels();
+  buildPhysicsPanel();
+  try {
+    const saved = localStorage.getItem('peLayout');
+    if (saved && layouts[saved] && saved !== 'time') setTimeout(() => switchLayout(saved), 100);
+  } catch(e) {}
+
+  requestAnimationFrame(animate);
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.scale(dpr, dpr);
+  threadsCanvas.width = window.innerWidth * dpr;
+  threadsCanvas.height = window.innerHeight * dpr;
+  threadsCanvas.style.width = window.innerWidth + 'px';
+  threadsCanvas.style.height = window.innerHeight + 'px';
+  threadsCtx.scale(dpr, dpr);
+}
+
+// Progressive loading: only load visible thumbnails
+let loadingQueue = [];
+let activeLoads = 0;
+const MAX_CONCURRENT_LOADS = 50;
+
+function loadVisibleThumbnails() {
+  const s = viewScale / 8;
+  const w = window.innerWidth, h = window.innerHeight;
+  const MIN_SCREEN_SIZE = 20; // don't load if rendered smaller than this
+
+  // Find visible unloaded photos with priority scoring
+  const toLoad = [];
+  for (const ps of photoStates) {
+    if (ps.loaded || ps.loading) continue;
+    if (ps.alpha < 0.05) continue; // hidden photos (e.g. unclassified in Objects view)
+
+    const [sx, sy] = worldToScreen(ps.x, ps.y);
+    if (sx < -100 || sx > w + 100 || sy < -100 || sy > h + 100) continue;
+
+    // Size threshold: skip if too small to see
+    const aspect = ps.aspect || 1.33;
+    const screenW = Math.sqrt(CARD_AREA * aspect * ps.scale * P.photoSize) * s;
+    if (screenW < MIN_SCREEN_SIZE) continue;
+
+    // Priority: larger, more opaque photos first
+    const priority = screenW * ps.alpha * ps.scale;
+    toLoad.push({ ps, priority });
+  }
+
+  // Sort by priority descending — load biggest/most visible first
+  toLoad.sort((a, b) => b.priority - a.priority);
+
+  // Load up to MAX_CONCURRENT_LOADS
+  for (const { ps } of toLoad) {
+    if (activeLoads >= MAX_CONCURRENT_LOADS) break;
+    ps.loading = true;
+    activeLoads++;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      ps.img = img; ps.loaded = true;
+      ps.aspect = img.naturalWidth / img.naturalHeight;
+      activeLoads--;
+    };
+    img.onerror = () => { ps.loading = false; activeLoads--; };
+    img.src = `${THUMB_BASE}/${ps.id}.jpg`;
+  }
+}
+
+// Reflow: recalculate layout spacing for current viewport
+let lastReflowZoom = 1;
+let reflowDebounce = null;
+
+function reflowLayout() {
+  const nl = layouts[currentLayout || targetLayout];
+  if (!nl) return;
+
+  animFrom = {}; animTo = {};
+  photoStates.forEach(ps => {
+    animFrom[ps.id] = [ps.x, ps.y];
+    const t = nl[ps.id] || [0, 0];
+    // Scale positions by current spacing param
+    animTo[ps.id] = [t[0] * P.spacing, t[1] * P.spacing];
+    ps.targetX = t[0] * P.spacing;
+    ps.targetY = t[1] * P.spacing;
+  });
+
+  animStart = performance.now();
+  animDuration = ANIM_DURATION;
+  animating = true;
+  lastReflowZoom = viewScale;
+}
+
+function checkAutoReflow() {
+  const ratio = viewScale / lastReflowZoom;
+  if (ratio > 2 || ratio < 0.5) {
+    clearTimeout(reflowDebounce);
+    reflowDebounce = setTimeout(reflowLayout, 500);
+  }
+}
+
+function loadThumbnails() {
+  // Progressive only — loadVisibleThumbnails() runs per frame
+  // No eager batch loading — thumbnails load as they enter viewport
+  loadVisibleThumbnails();
+}
+
+// ===== LAYOUT SWITCHING =====
+
+function switchLayout(name) {
+  if (name === currentLayout && !animating) return;
+  document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.querySelector(`[data-layout="${name}"]`);
+  if (btn) btn.classList.add('active');
+
+  const nl = layouts[name];
+  if (!nl) return;
+  animFrom = {}; animTo = {};
+  photoStates.forEach(ps => {
+    animFrom[ps.id] = [ps.x, ps.y];
+    const t = nl[ps.id] || [0, 0];
+    animTo[ps.id] = t;
+    ps.targetX = t[0]; ps.targetY = t[1];
+    // In Objects view: hide unclassified photos
+    if (name === 'objects' && objectsUnclassified.has(ps.id)) {
+      ps.targetScale = 0; ps.targetAlpha = 0;
+    } else {
+      ps.targetScale = 1; ps.targetAlpha = 0.82;
+    }
+  });
+
+  targetLayout = name;
+  animStart = performance.now();
+  animDuration = ANIM_DURATION;
+  animating = true;
+  selectedPhoto = null; threads = [];
+  folded = false; foldCenter = null; foldRelated.clear();
+  try { localStorage.setItem('peLayout', name); } catch(e) {}
+  updateAxisLabels();
+  updateDiveIndicator();
+  // Force thumbnail scan after layout animation settles
+  setTimeout(loadVisibleThumbnails, 100);
+  setTimeout(loadVisibleThumbnails, 1000);
+  setTimeout(loadVisibleThumbnails, 2500);
+}
+
+function updateAxisLabels() {
+  const l = AXIS_LABELS[targetLayout] || ['', ''];
+  document.getElementById('axis-x').textContent = folded ? '' : l[0];
+  document.getElementById('axis-y').textContent = folded ? '' : l[1];
+}
+
+// ===== 4D FOLD-INTO =====
+
+function classifyConnections(centerPhoto) {
+  const sameDay = centerPhoto.t ? centerPhoto.t.slice(0, 10) : '';
+  const connections = [];
+  const relatedIds = new Set();
+
+  for (const ps of photoStates) {
+    if (ps.id === centerPhoto.id) continue;
+    const p = photos.find(ph => ph.id === ps.id);
+    if (!p) continue;
+
+    const sharedFaces = centerPhoto.faces.filter(f => p.faces.includes(f));
+    const pDay = p.t ? p.t.slice(0, 10) : '';
+    const sameLocation = Math.sqrt((centerPhoto.lat - p.lat) ** 2 + (centerPhoto.lon - p.lon) ** 2) * 111 < 0.3;
+    const sharedObjects = centerPhoto.objects.filter(o => p.objects.includes(o));
+
+    // Inner ring: same person + same day
+    if (sharedFaces.length > 0 && pDay === sameDay) {
+      connections.push({ id: ps.id, ring: 0, type: 'person+day', color: '#f59e0b' });
+      relatedIds.add(ps.id);
+    }
+    // Middle ring: same person (different day) OR same day (different person)
+    else if (sharedFaces.length > 0) {
+      connections.push({ id: ps.id, ring: 1, type: 'person', color: '#f59e0b' });
+      relatedIds.add(ps.id);
+    }
+    else if (pDay === sameDay) {
+      connections.push({ id: ps.id, ring: 1, type: 'same-day', color: '#10b981' });
+      relatedIds.add(ps.id);
+    }
+    // Outer ring: same location OR shared objects
+    else if (sameLocation) {
+      connections.push({ id: ps.id, ring: 2, type: 'location', color: '#3b82f6' });
+      relatedIds.add(ps.id);
+    }
+    else if (sharedObjects.length >= 2) {
+      connections.push({ id: ps.id, ring: 2, type: 'objects', color: '#8b5cf6' });
+      relatedIds.add(ps.id);
+    }
+  }
+
+  return { connections, relatedIds };
+}
+
+function computeSmartGrid(centerPhoto, connections) {
+  // Group connections into labeled rows
+  const rows = [];
+  const innerRow = connections.filter(c => c.ring === 0).sort((a, b) => {
+    const pa = photos.find(p => p.id === a.id);
+    const pb = photos.find(p => p.id === b.id);
+    return (pa?.t || '').localeCompare(pb?.t || '');
+  });
+  if (innerRow.length) rows.push({ label: 'Same person + day', items: innerRow });
+
+  const personRow = connections.filter(c => c.ring === 1 && c.type === 'person').sort((a, b) => {
+    const pa = photos.find(p => p.id === a.id);
+    const pb = photos.find(p => p.id === b.id);
+    return (pa?.t || '').localeCompare(pb?.t || '');
+  });
+  if (personRow.length) {
+    const faceName = centerPhoto.faces[0] || 'Person';
+    rows.push({ label: `${faceName} — other days`, items: personRow });
+  }
+
+  const dayRow = connections.filter(c => c.ring === 1 && c.type === 'same-day').sort((a, b) => {
+    const pa = photos.find(p => p.id === a.id);
+    const pb = photos.find(p => p.id === b.id);
+    return (pa?.t || '').localeCompare(pb?.t || '');
+  });
+  if (dayRow.length) rows.push({ label: 'Same day', items: dayRow });
+
+  const outerRow = connections.filter(c => c.ring === 2).sort((a, b) => {
+    const pa = photos.find(p => p.id === a.id);
+    const pb = photos.find(p => p.id === b.id);
+    return (pa?.t || '').localeCompare(pb?.t || '');
+  });
+  if (outerRow.length) rows.push({ label: 'Same location / objects', items: outerRow });
+
+  // Compute grid positions
+  const cellW = 5 * P.spacing;
+  const cellH = 4.5 * P.spacing;
+  const positions = {};
+  let rowY = -cellH; // first row above center
+
+  rows.forEach(row => {
+    const n = row.items.length;
+    const rowWidth = n * cellW;
+    const startX = -rowWidth / 2 + cellW / 2;
+    row.items.forEach((conn, col) => {
+      positions[conn.id] = [startX + col * cellW, rowY];
+    });
+    rowY -= cellH;
+  });
+
+  return { positions, rows };
+}
+
+function foldInto(centerPs) {
+  if (diveStack.length >= MAX_DIVE_DEPTH) return;
+
+  const centerPhoto = photos.find(p => p.id === centerPs.id);
+  if (!centerPhoto) return;
+
+  // Save current state to dive stack
+  const savedPositions = {};
+  photoStates.forEach(ps => { savedPositions[ps.id] = [ps.x, ps.y, ps.scale, ps.alpha]; });
+  diveStack.push({
+    centerPhotoId: centerPs.id,
+    savedPositions,
+    savedViewX: viewX, savedViewY: viewY, savedViewScale: viewScale,
+    thumbUrl: `${THUMB_BASE}/${centerPs.id}.jpg`,
+  });
+
+  // Classify connections
+  const { connections, relatedIds } = classifyConnections(centerPhoto);
+  foldCenter = centerPs;
+  foldRelated = relatedIds;
+  foldRelated.add(centerPs.id);
+  foldConnections = connections;
+  folded = true;
+
+  // Compute target positions based on relatedLayout setting
+  animFrom = {}; animTo = {};
+  const layoutMode = P.relatedLayout; // 0=scatter, 0.5=grid, 1=orbit
+
+  // Center photo always moves to origin
+  animFrom[centerPs.id] = [centerPs.x, centerPs.y];
+  animTo[centerPs.id] = [0, 0];
+  centerPs.targetScale = 1.5;
+  centerPs.targetAlpha = 1;
+
+  if (layoutMode >= 0.75) {
+    // === ORBIT MODE (concentric rings) ===
+    const ringRadii = [8, 16, 26];
+    const ringCounts = [0, 0, 0];
+    connections.forEach(c => ringCounts[c.ring]++);
+    const ringIndices = [0, 0, 0];
+
+    connections.forEach(c => {
+      const ps = photoStates.find(p => p.id === c.id);
+      if (!ps) return;
+      const ring = c.ring;
+      const count = ringCounts[ring];
+      const idx = ringIndices[ring]++;
+      const angle = (idx / Math.max(count, 1)) * Math.PI * 2 - Math.PI / 2;
+      const r = ringRadii[ring] * P.spacing;
+      animFrom[c.id] = [ps.x, ps.y];
+      animTo[c.id] = [Math.cos(angle) * r, Math.sin(angle) * r];
+      ps.targetScale = 1;
+      ps.targetAlpha = 0.9;
+    });
+  } else if (layoutMode >= 0.25) {
+    // === GRID MODE (smart rows) ===
+    const { positions } = computeSmartGrid(centerPhoto, connections);
+    connections.forEach(c => {
+      const ps = photoStates.find(p => p.id === c.id);
+      if (!ps) return;
+      animFrom[c.id] = [ps.x, ps.y];
+      animTo[c.id] = positions[c.id] || [0, 0];
+      ps.targetScale = 1;
+      ps.targetAlpha = 0.9;
+    });
+  } else {
+    // === SCATTER MODE (highlight in place) ===
+    connections.forEach(c => {
+      const ps = photoStates.find(p => p.id === c.id);
+      if (!ps) return;
+      animFrom[c.id] = [ps.x, ps.y];
+      animTo[c.id] = [ps.x, ps.y]; // stay in place
+      ps.targetScale = 1.1;
+      ps.targetAlpha = 0.95;
+    });
+  }
+
+  // Unrelated: push outward and fade
+  photoStates.forEach(ps => {
+    if (foldRelated.has(ps.id)) return;
+    animFrom[ps.id] = [ps.x, ps.y];
+    // Stretch away from center
+    const dx = ps.x, dy = ps.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const pushDist = 80 + dist * 1.5;
+    animTo[ps.id] = [(dx / dist) * pushDist, (dy / dist) * pushDist];
+    ps.targetScale = 0.3;
+    ps.targetAlpha = 0.04;
+  });
+
+  animStart = performance.now();
+  animDuration = FOLD_DURATION;
+  animating = true;
+  squeezeAmount = 1; // will animate to 0
+
+  // Center view
+  viewX = window.innerWidth / 2;
+  viewY = window.innerHeight / 2;
+
+  selectedPhoto = centerPs;
+  threads = [];
+  updateAxisLabels();
+  updateDiveStack();
+  updateDiveIndicator();
+}
+
+function unfoldOne() {
+  if (diveStack.length === 0) return;
+
+  const state = diveStack.pop();
+  animFrom = {}; animTo = {};
+
+  photoStates.forEach(ps => {
+    animFrom[ps.id] = [ps.x, ps.y];
+    const saved = state.savedPositions[ps.id];
+    if (saved) {
+      animTo[ps.id] = [saved[0], saved[1]];
+      ps.targetScale = saved[2];
+      ps.targetAlpha = saved[3];
+    }
+  });
+
+  viewX = state.savedViewX;
+  viewY = state.savedViewY;
+  viewScale = state.savedViewScale;
+
+  animStart = performance.now();
+  animDuration = FOLD_DURATION;
+  animating = true;
+  squeezeAmount = 1;
+
+  if (diveStack.length === 0) {
+    folded = false;
+    foldCenter = null;
+    foldRelated.clear();
+    foldConnections = [];
+  } else {
+    // Restore previous fold state
+    const prev = diveStack[diveStack.length - 1];
+    foldCenter = photoStates.find(ps => ps.id === prev.centerPhotoId) || null;
+  }
+
+  selectedPhoto = null;
+  threads = [];
+  updateDiveStack();
+  updateDiveIndicator();
+  updateAxisLabels();
+}
+
+function unfoldAll() {
+  while (diveStack.length > 0) {
+    const state = diveStack.pop();
+    if (diveStack.length === 0) {
+      // Restore to original layout positions
+      animFrom = {}; animTo = {};
+      photoStates.forEach(ps => {
+        animFrom[ps.id] = [ps.x, ps.y];
+        const saved = state.savedPositions[ps.id];
+        if (saved) {
+          animTo[ps.id] = [saved[0], saved[1]];
+          ps.targetScale = saved[2];
+          ps.targetAlpha = saved[3];
+        }
+      });
+      viewX = state.savedViewX;
+      viewY = state.savedViewY;
+      viewScale = state.savedViewScale;
+    }
+  }
+
+  animStart = performance.now();
+  animDuration = FOLD_DURATION;
+  animating = true;
+  folded = false;
+  foldCenter = null;
+  foldRelated.clear();
+  foldConnections = [];
+  selectedPhoto = null;
+  threads = [];
+  updateDiveStack();
+  updateDiveIndicator();
+  updateAxisLabels();
+}
+
+function updateDiveStack() {
+  const container = document.getElementById('dive-stack');
+  container.innerHTML = '';
+  diveStack.forEach((state, i) => {
+    const card = document.createElement('div');
+    card.className = 'dive-card';
+    card.title = `Dive level ${i + 1} — click to return`;
+    const img = document.createElement('img');
+    img.src = state.thumbUrl;
+    card.appendChild(img);
+    card.addEventListener('click', () => {
+      // Pop back to this level
+      while (diveStack.length > i) unfoldOne();
+    });
+    container.appendChild(card);
+  });
+}
+
+function updateDiveIndicator() {
+  const el = document.getElementById('dive-indicator');
+  if (diveStack.length > 0) {
+    el.style.display = 'block';
+    el.textContent = `Depth ${diveStack.length} / ${MAX_DIVE_DEPTH}`;
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// ===== ANIMATION =====
+
+function easeOutBack(t) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+function worldToScreen(wx, wy) {
+  // Apply squeeze during fold transition
+  const sy_squeeze = squeezeAmount > 0.01 ? (1 - squeezeAmount * 0.3) : 1;
+  return [viewX + wx * viewScale, viewY - wy * viewScale * sy_squeeze];
+}
+
+function animate(now) {
+  requestAnimationFrame(animate);
+
+  if (animating) {
+    let t = (now - animStart) / animDuration;
+    if (t >= 1) { t = 1; animating = false; currentLayout = targetLayout; }
+    const ease = easeOutBack(t);
+
+    // Squeeze effect: peaks at t=0.3, settles at 0
+    squeezeAmount = Math.sin(Math.min(t, 0.6) / 0.6 * Math.PI) * (1 - t) * 0.8;
+
+    photoStates.forEach(ps => {
+      const f = animFrom[ps.id], to = animTo[ps.id];
+      if (f && to) {
+        const dx = to[0] - f[0], dy = to[1] - f[1];
+        // Curved path via bezier midpoint
+        const mx = (f[0] + to[0]) / 2 + dy * 0.15;
+        const my = (f[1] + to[1]) / 2 - dx * 0.15;
+        const u = 1 - ease;
+        ps.x = u * u * f[0] + 2 * u * ease * mx + ease * ease * to[0];
+        ps.y = u * u * f[1] + 2 * u * ease * my + ease * ease * to[1];
+      }
+      // Smooth scale and alpha
+      ps.scale += (ps.targetScale - ps.scale) * 0.08;
+      ps.alpha += (ps.targetAlpha - ps.alpha) * 0.08;
+    });
+  } else {
+    // Still smooth scale/alpha when not animating
+    photoStates.forEach(ps => {
+      ps.scale += (ps.targetScale - ps.scale) * 0.1;
+      ps.alpha += (ps.targetAlpha - ps.alpha) * 0.1;
+    });
+  }
+
+  // Smooth zoom interpolation
+  updateSmoothZoom();
+
+  // Apply physics forces
+  const dt = 1/60;
+  applyPhysics(dt);
+
+  // Progressive thumbnail loading (~every 500ms)
+  if (Math.floor(now / 500) !== Math.floor((now - 16) / 500)) loadVisibleThumbnails();
+
+  draw();
+  drawThreads();
+}
+
+let lastAnimTime = 0;
+
+// ===== DRAWING =====
+
+function draw() {
+  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  const s = viewScale / 8;
+
+  // Build connected set for dimming
+  const connectedSet = selectedPhoto && threads.length
+    ? new Set([selectedPhoto.id, ...threads.map(t => t.targetId)])
+    : null;
+
+  // Draw ring guides when folded
+  if (folded && foldCenter) {
+    const ringRadii = [8, 16, 26];
+    const ringColors = ['rgba(245,158,11,0.06)', 'rgba(16,185,129,0.05)', 'rgba(59,130,246,0.04)'];
+    ringRadii.forEach((r, i) => {
+      const [cx, cy] = worldToScreen(0, 0);
+      const screenR = r * viewScale;
+      ctx.beginPath();
+      ctx.arc(cx, cy, screenR, 0, Math.PI * 2);
+      ctx.strokeStyle = ringColors[i];
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+  }
+
+  for (let i = 0; i < photoStates.length; i++) {
+    const ps = photoStates[i];
+    const [sx, sy] = worldToScreen(ps.x, ps.y);
+
+    const aspect = ps.aspect || 1.33;
+    const scaledArea = CARD_AREA * ps.scale * P.photoSize;
+    const cw = Math.sqrt(scaledArea * aspect) * s;
+    const ch = Math.sqrt(scaledArea / aspect) * s;
+
+    if (sx < -cw || sx > window.innerWidth + cw || sy < -ch || sy > window.innerHeight + ch) continue;
+    if (cw < 1.5) continue;
+
+    const isH = hoveredPhoto === ps;
+    const isS = selectedPhoto === ps;
+    const isCenter = foldCenter === ps;
+
+    // Determine alpha with physics opacity + DOF
+    let alpha = ps.alpha * P.opacity;
+    if (connectedSet && !folded) {
+      alpha = connectedSet.has(ps.id) ? (isS ? 1 : 0.9) : 0.1;
+    }
+    // Depth of field: fade based on distance from screen center
+    if (P.dof > 0.01) {
+      const distFromCenter = Math.sqrt((sx - window.innerWidth/2)**2 + (sy - window.innerHeight/2)**2);
+      const maxDist = Math.sqrt(window.innerWidth**2 + window.innerHeight**2) / 2;
+      const dofFade = 1 - P.dof * (distFromCenter / maxDist);
+      alpha *= Math.max(dofFade, 0.05);
+    }
+
+    if (ps.loaded && ps.img) {
+      ctx.globalAlpha = Math.max(alpha, 0.02);
+      if (cw > 8 && alpha > 0.3) { ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 3; }
+
+      // Glow for center photo
+      if (isCenter && folded) {
+        ctx.shadowColor = 'rgba(245,158,11,0.4)';
+        ctx.shadowBlur = 15;
+      }
+
+      ctx.drawImage(ps.img, sx - cw / 2, sy - ch / 2, cw, ch);
+      ctx.shadowBlur = 0;
+
+      if (isH || isS || isCenter) {
+        ctx.strokeStyle = isCenter ? '#f59e0b' : isS ? '#f59e0b' : 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = isCenter ? 2.5 : isS ? 2 : 1;
+        ctx.strokeRect(sx - cw / 2, sy - ch / 2, cw, ch);
+      }
+    } else {
+      // Colored dot for unloaded photos
+      ctx.globalAlpha = Math.max(alpha * 0.6, 0.05);
+      ctx.fillStyle = ps.faces && ps.faces.length > 0 ? '#f59e0b' : '#3b5998';
+      const dotR = Math.max(cw * 0.15, 2);
+      ctx.beginPath();
+      ctx.arc(sx, sy, dotR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Draw column headers in Objects view
+  if ((currentLayout === 'objects' || targetLayout === 'objects') && objectColumns.length && !folded) {
+    ctx.font = '11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    for (const col of objectColumns) {
+      const [sx, sy] = worldToScreen(col.x, 32); // above the data (y=30 is first row)
+      if (sx < -50 || sx > window.innerWidth + 50) continue;
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(col.label, sx, sy - 8);
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#888';
+      ctx.fillText(`(${col.count})`, sx, sy + 6);
+    }
+    ctx.textAlign = 'start';
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawThreads() {
+  threadsCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+  // Draw fold connection threads when folded
+  if (folded && foldCenter) {
+    const [cx, cy] = worldToScreen(foldCenter.x, foldCenter.y);
+
+    for (const conn of foldConnections) {
+      const target = photoStates.find(p => p.id === conn.id);
+      if (!target || target.alpha < 0.1) continue;
+      const [tx, ty] = worldToScreen(target.x, target.y);
+
+      // Glow
+      threadsCtx.beginPath();
+      threadsCtx.moveTo(cx, cy);
+      threadsCtx.quadraticCurveTo((cx + tx) / 2, (cy + ty) / 2 - 15, tx, ty);
+      threadsCtx.strokeStyle = conn.color;
+      threadsCtx.lineWidth = 6;
+      threadsCtx.globalAlpha = 0.06 * P.threadAlpha * 2;
+      threadsCtx.stroke();
+
+      // Core
+      threadsCtx.beginPath();
+      threadsCtx.moveTo(cx, cy);
+      threadsCtx.quadraticCurveTo((cx + tx) / 2, (cy + ty) / 2 - 15, tx, ty);
+      threadsCtx.strokeStyle = conn.color;
+      threadsCtx.lineWidth = 2;
+      threadsCtx.globalAlpha = 0.4 * P.threadAlpha * 2;
+      threadsCtx.setLineDash([5, 3]);
+      threadsCtx.lineDashOffset = -(performance.now() / 35);
+      threadsCtx.stroke();
+      threadsCtx.setLineDash([]);
+
+      // Dot
+      threadsCtx.beginPath();
+      threadsCtx.arc(tx, ty, 3, 0, Math.PI * 2);
+      threadsCtx.fillStyle = conn.color;
+      threadsCtx.globalAlpha = 0.6;
+      threadsCtx.fill();
+    }
+    threadsCtx.globalAlpha = 1;
+    return;
+  }
+
+  // Normal thread drawing when not folded
+  if (!selectedPhoto || !threads.length) return;
+  const [sx, sy] = worldToScreen(selectedPhoto.x, selectedPhoto.y);
+
+  for (const th of threads) {
+    const target = photoStates.find(p => p.id === th.targetId);
+    if (!target) continue;
+    const [tx, ty] = worldToScreen(target.x, target.y);
+
+    threadsCtx.beginPath();
+    threadsCtx.moveTo(sx, sy);
+    threadsCtx.quadraticCurveTo((sx + tx) / 2, (sy + ty) / 2 - 30, tx, ty);
+    threadsCtx.strokeStyle = th.color;
+    threadsCtx.lineWidth = 8;
+    threadsCtx.globalAlpha = 0.08;
+    threadsCtx.stroke();
+
+    threadsCtx.beginPath();
+    threadsCtx.moveTo(sx, sy);
+    threadsCtx.quadraticCurveTo((sx + tx) / 2, (sy + ty) / 2 - 30, tx, ty);
+    threadsCtx.strokeStyle = th.color;
+    threadsCtx.lineWidth = 3;
+    threadsCtx.globalAlpha = 0.5;
+    threadsCtx.setLineDash([6, 4]);
+    threadsCtx.lineDashOffset = -(performance.now() / 40);
+    threadsCtx.stroke();
+    threadsCtx.setLineDash([]);
+
+    threadsCtx.beginPath();
+    threadsCtx.arc(tx, ty, 4, 0, Math.PI * 2);
+    threadsCtx.fillStyle = th.color;
+    threadsCtx.globalAlpha = 0.7;
+    threadsCtx.fill();
+  }
+  threadsCtx.globalAlpha = 1;
+}
+
+// ===== HIT TESTING =====
+
+function findPhotoAt(mx, my) {
+  const s = viewScale / 8;
+  for (let i = photoStates.length - 1; i >= 0; i--) {
+    const ps = photoStates[i];
+    if (ps.alpha < 0.1) continue; // skip hidden photos
+    const aspect = ps.aspect || 1.33;
+    const scaledArea = CARD_AREA * ps.scale;
+    const hw = Math.sqrt(scaledArea * aspect) * s / 2;
+    const hh = Math.sqrt(scaledArea / aspect) * s / 2;
+    const [sx, sy] = worldToScreen(ps.x, ps.y);
+    if (mx >= sx - hw && mx <= sx + hw && my >= sy - hh && my <= sy + hh) return ps;
+  }
+  return null;
+}
+
+function buildThreads(ps) {
+  threads = [];
+  const photo = photos.find(p => p.id === ps.id);
+  if (!photo) return;
+
+  if (photo.faces.length) {
+    for (const other of photoStates) {
+      if (other.id === ps.id) continue;
+      const op = photos.find(p => p.id === other.id);
+      if (op && op.faces.some(f => photo.faces.includes(f)))
+        threads.push({ targetId: other.id, color: '#f59e0b' });
+    }
+  }
+
+  for (const other of photoStates) {
+    if (other.id === ps.id) continue;
+    const op = photos.find(p => p.id === other.id);
+    if (!op) continue;
+    const d = Math.sqrt((photo.lat - op.lat) ** 2 + (photo.lon - op.lon) ** 2) * 111;
+    if (d < 0.3) threads.push({ targetId: other.id, color: '#3b82f6' });
+  }
+
+  if (threads.length > 100) {
+    const person = threads.filter(t => t.color === '#f59e0b');
+    const loc = threads.filter(t => t.color === '#3b82f6').slice(0, 50);
+    threads = [...person, ...loc];
+  }
+}
+
+// ===== EVENTS =====
+
+function onMouseDown(e) {
+  isDragging = true;
+  dragStartX = e.clientX; dragStartY = e.clientY;
+  dragViewX = viewX; dragViewY = viewY;
+}
+
+function onMouseMove(e) {
+  if (isDragging) {
+    viewX = dragViewX + (e.clientX - dragStartX);
+    viewY = dragViewY + (e.clientY - dragStartY);
+    return;
+  }
+  hoveredPhoto = findPhotoAt(e.clientX, e.clientY);
+  const tt = document.getElementById('tooltip');
+  if (hoveredPhoto) {
+    canvas.style.cursor = 'pointer';
+    const dt = new Date(hoveredPhoto.t);
+    const pad = n => String(n).padStart(2, '0');
+    tt.querySelector('.tt-date').textContent =
+      `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    tt.querySelector('.tt-faces').textContent = hoveredPhoto.faces.length ? hoveredPhoto.faces.join(', ') : '';
+    tt.querySelector('.tt-objects').textContent = hoveredPhoto.objects.length ? hoveredPhoto.objects.slice(0, 4).join(' \u00b7 ') : '';
+    tt.style.display = 'block';
+    tt.style.left = Math.min(e.clientX + 16, window.innerWidth - 260) + 'px';
+    tt.style.top = (e.clientY - 10) + 'px';
+  } else {
+    canvas.style.cursor = 'grab';
+    tt.style.display = 'none';
+  }
+}
+
+function onMouseUp() { isDragging = false; }
+
+function onClickCanvas(e) {
+  if (Math.abs(e.clientX - dragStartX) + Math.abs(e.clientY - dragStartY) > 5) return;
+  const ps = findPhotoAt(e.clientX, e.clientY);
+  if (ps) {
+    selectedPhoto = ps;
+    if (!folded) buildThreads(ps);
+  } else {
+    selectedPhoto = null;
+    threads = [];
+  }
+}
+
+function onDblClick(e) {
+  const ps = findPhotoAt(e.clientX, e.clientY);
+  if (ps) openOverlay(ps);
+}
+
+let targetViewScale = null;
+let zoomCenterX = 0, zoomCenterY = 0;
+
+function onWheel(e) {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.97 : 1.03;
+  targetViewScale = Math.max(0.1, Math.min((targetViewScale || viewScale) * factor, 10));
+  zoomCenterX = e.clientX;
+  zoomCenterY = e.clientY;
+  checkAutoReflow();
+}
+
+function updateSmoothZoom() {
+  if (targetViewScale === null || Math.abs(targetViewScale - viewScale) < 0.001) {
+    targetViewScale = null;
+    return;
+  }
+  const prevScale = viewScale;
+  viewScale += (targetViewScale - viewScale) * 0.15; // LERP factor
+  const ratio = viewScale / prevScale;
+  viewX = zoomCenterX - (zoomCenterX - viewX) * ratio;
+  viewY = zoomCenterY - (zoomCenterY - viewY) * ratio;
+}
+
+function onKeyDown(e) {
+  // Shift+, (Comma) toggles physics panel
+  if (e.shiftKey && e.code === 'Comma') { e.preventDefault(); togglePhysicsPanel(); return; }
+  // P key also toggles (easier)
+  if (e.code === 'KeyP' && !e.shiftKey && !e.ctrlKey) { togglePhysicsPanel(); return; }
+
+  if (e.code === 'Space') { e.preventDefault(); toggleAutoMode(); }
+
+  // R key: reflow layout
+  if (e.code === 'KeyR' && !e.shiftKey && !e.ctrlKey) {
+    e.preventDefault(); reflowLayout(); return;
+  }
+
+  // F key: fold into selected photo
+  if (e.code === 'KeyF' && selectedPhoto) {
+    e.preventDefault();
+    foldInto(selectedPhoto);
+    return;
+  }
+
+  // Arrow keys in overlay: navigate photos
+  if (overlayOpen && (e.code === 'ArrowRight' || e.code === 'ArrowDown')) {
+    e.preventDefault(); overlayNav(1); return;
+  }
+  if (overlayOpen && (e.code === 'ArrowLeft' || e.code === 'ArrowUp')) {
+    e.preventDefault(); overlayNav(-1); return;
+  }
+
+  // Escape: close overlay, unfold, or deselect
+  if (e.code === 'Escape') {
+    if (overlayOpen) {
+      closeOverlay();
+    } else if (folded) {
+      unfoldOne();
+    } else {
+      selectedPhoto = null;
+      threads = [];
+    }
+    return;
+  }
+
+  // Backspace: also unfold
+  if (e.code === 'Backspace' && folded) {
+    e.preventDefault();
+    unfoldOne();
+    return;
+  }
+
+  // R key: reflow current layout
+  if (e.code === 'KeyR' && !e.shiftKey && !e.ctrlKey && !folded) {
+    e.preventDefault();
+    reflowLayout();
+    return;
+  }
+
+  const lk = { Digit1: 'time', Digit2: 'place', Digit3: 'people', Digit4: 'engagement', Digit5: 'radius', Digit6: 'objects' };
+  if (lk[e.code]) {
+    if (folded) unfoldAll();
+    switchLayout(lk[e.code]);
+  }
+}
+
+function reflowLayout() {
+  // Reflow: re-apply current layout with spacing adjusted to viewport
+  const nl = layouts[currentLayout];
+  if (!nl) return;
+
+  animFrom = {}; animTo = {};
+  photoStates.forEach(ps => {
+    animFrom[ps.id] = [ps.x, ps.y];
+    const t = nl[ps.id] || [0, 0];
+    animTo[ps.id] = [t[0] * P.spacing, t[1] * P.spacing];
+    ps.targetX = t[0] * P.spacing;
+    ps.targetY = t[1] * P.spacing;
+  });
+
+  animStart = performance.now();
+  animDuration = P.speed * 1000;
+  animating = true;
+}
+
+function toggleAutoMode() {
+  autoMode = !autoMode;
+  if (autoMode) {
+    if (folded) unfoldAll();
+    const order = ['time', 'place', 'people', 'engagement', 'radius', 'objects'];
+    let i = order.indexOf(currentLayout);
+    autoTimer = setInterval(() => { i = (i + 1) % order.length; switchLayout(order[i]); }, 5000);
+  } else { clearInterval(autoTimer); }
+}
+
+let overlayOpen = false;
+let overlayPhotoIdx = -1;
+
+function openOverlay(ps) {
+  overlayPhotoIdx = photoStates.indexOf(ps);
+  updateOverlayContent(ps);
+  document.getElementById('overlay').classList.add('active');
+  overlayOpen = true;
+}
+
+function updateOverlayContent(ps, crossfade) {
+  const img = document.getElementById('overlay-img');
+  const update = () => {
+    img.src = `${THUMB_BASE}/${ps.id}.jpg`;
+    const dt = new Date(ps.t);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('o-date').textContent =
+      `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+    document.getElementById('o-faces').textContent = ps.faces.length ? ps.faces.join(', ') : '';
+    document.getElementById('o-objects').textContent = ps.objects.length ? ps.objects.join(' \u00b7 ') : '';
+    if (crossfade) {
+      requestAnimationFrame(() => { img.classList.remove('crossfade'); });
+    }
+  };
+  if (crossfade) {
+    img.classList.add('crossfade');
+    setTimeout(update, 150);
+  } else {
+    update();
+  }
+}
+
+function overlayNav(dir) {
+  if (overlayPhotoIdx < 0) return;
+  overlayPhotoIdx = (overlayPhotoIdx + dir + photoStates.length) % photoStates.length;
+  updateOverlayContent(photoStates[overlayPhotoIdx], true);
+}
+
+function closeOverlay() {
+  document.getElementById('overlay').classList.remove('active');
+  overlayOpen = false;
+  overlayPhotoIdx = -1;
+}
+window.closeOverlay = closeOverlay;
+
+init();
+</script>
+</body>
+</html>

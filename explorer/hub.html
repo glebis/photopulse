@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Photo Pulse — Explorations</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #040407; color: #fff; font-family: -apple-system, sans-serif;
+  display: flex; justify-content: center; align-items: center;
+  min-height: 100vh; padding: 40px;
+}
+
+.grid {
+  display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 20px; max-width: 700px; width: 100%;
+}
+
+.card {
+  background: rgba(255,255,255,0.02); border: 1px solid #1a1a2e;
+  border-radius: 12px; padding: 28px; cursor: pointer;
+  transition: all 0.3s; text-decoration: none; color: inherit;
+  display: block;
+}
+.card:hover {
+  border-color: #f59e0b; background: rgba(245,158,11,0.04);
+  transform: translateY(-2px);
+}
+
+.card h2 { font-size: 16px; font-weight: 500; margin-bottom: 6px; color: #ccc; }
+.card p { font-size: 12px; color: #555; line-height: 1.5; }
+.card .tag {
+  display: inline-block; margin-top: 10px;
+  font-size: 10px; color: #444; border: 1px solid #222;
+  padding: 2px 8px; border-radius: 8px;
+}
+
+h1 {
+  font-size: 14px; color: #444; font-weight: 400;
+  text-align: center; margin-bottom: 30px;
+  letter-spacing: 2px; text-transform: uppercase;
+  grid-column: 1 / -1;
+}
+</style>
+</head>
+<body>
+<div class="grid">
+  <h1>Photo Pulse Explorations</h1>
+
+  <a class="card" href="index.html">
+    <h2>Folding Explorer</h2>
+    <p>12,530 photos across 5 layout projections. Animated fold transitions reveal hidden patterns. 4D fold-into navigation with dive stacking.</p>
+    <span class="tag">Full 2025 &middot; Interactive</span>
+  </a>
+
+  <a class="card" href="calendar.html">
+    <h2>Calendar Wall</h2>
+    <p>Every day from 2005 to 2025 as a single heatmap. Color intensity = photo density. 20 years of behavioral rhythm at a glance.</p>
+    <span class="tag">20 years &middot; Overview</span>
+  </a>
+
+  <a class="card" href="ekg.html">
+    <h2>Behavioral EKG</h2>
+    <p>Continuous waveform of daily photo count. Line color = social density. Line width = travel radius. Annotated life events.</p>
+    <span class="tag">20 years &middot; Waveform</span>
+  </a>
+
+  <a class="card" href="replay.html">
+    <h2>Life Replay</h2>
+    <p>GPS timelapse on a dark map. Watch 20 years of movement at 1000x speed. Photos drop along the path as a glowing dot traces your life.</p>
+    <span class="tag">28,841 photos &middot; Map</span>
+  </a>
+
+  <a class="card" href="absence.html">
+    <h2>Absence Map</h2>
+    <p>The photographic record inverted. Bright = silence, dark = captured. Streaks of 3+ days glow red. Hover gaps to see what came before and after.</p>
+    <span class="tag">Behavioral health &middot; Inverted</span>
+  </a>
+
+  <a class="card" href="embeddings.html">
+    <h2>Embedding Explorer</h2>
+    <p>Photos and notes in the same semantic space. UMAP projection of Gemini embeddings. See how your photos cluster with your thoughts.</p>
+    <span class="tag">Cross-modal &middot; UMAP</span>
+  </a>
+</div>
+</body>
+</html>

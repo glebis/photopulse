@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Behavioral EKG — 20 Years</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #040407; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; }
+
+#main-canvas { position: fixed; top: 0; left: 0; }
+#minimap { position: fixed; bottom: 0; left: 0; right: 0; height: 50px; background: #080810; border-top: 1px solid #1a1a2e; z-index: 50; cursor: pointer; }
+#minimap canvas { width: 100%; height: 100%; }
+
+#tooltip {
+  position: fixed; display: none; z-index: 200;
+  background: rgba(10,10,20,0.95); border: 1px solid #333;
+  padding: 8px 12px; border-radius: 8px; pointer-events: none;
+  font-size: 12px; line-height: 1.6; backdrop-filter: blur(8px);
+}
+
+#annotations {
+  position: fixed; top: 60px; right: 16px; z-index: 100;
+  font-size: 10px; color: #333; line-height: 1.8;
+}
+
+#day-photos {
+  position: fixed; bottom: 60px; left: 0; right: 0;
+  background: rgba(4,4,7,0.9); border-top: 1px solid #222;
+  padding: 10px 16px; display: none; z-index: 80;
+  max-height: 120px; overflow-x: auto; white-space: nowrap;
+}
+#day-photos.active { display: block; }
+#day-photos img { height: 80px; border-radius: 3px; margin-right: 4px; opacity: 0.85; }
+#day-label { font-size: 11px; color: #666; margin-bottom: 6px; }
+
+#hud {
+  position: fixed; top: 16px; left: 16px; z-index: 100;
+  font-size: 11px; color: #333;
+}
+#back a { color: #444; text-decoration: none; font-size: 12px; }
+#back a:hover { color: #f59e0b; }
+</style>
+</head>
+<body>
+
+<canvas id="main-canvas"></canvas>
+<div id="minimap"><canvas id="mini-canvas"></canvas></div>
+
+<div id="tooltip"></div>
+
+<div id="day-photos">
+  <div id="day-label"></div>
+  <div id="day-thumbs"></div>
+</div>
+
+<div id="hud">
+  <div id="back"><a href="/">&larr; Explorer</a></div>
+  <div style="margin-top:8px;color:#222">
+    <span style="color:#444">Scroll</span> pan &middot; <span style="color:#444">Click</span> show day
+  </div>
+</div>
+
+<script>
+const THUMB_BASE = `http://${location.hostname}:8080`;
+
+let data = [];
+let canvas, ctx, miniCanvas, miniCtx;
+let scrollX = 0;
+let maxScroll = 0;
+let maxCount = 0;
+let isDragging = false, dragStartX = 0, dragScrollX = 0;
+
+const PX_PER_DAY = 4;
+const WAVEFORM_HEIGHT_RATIO = 0.6;
+const SMOOTH_WINDOW = 7;
+
+// Annotations
+const ANNOTATIONS = [
+  { date: '2022-09-08', label: 'Moscow' },
+  { date: '2022-09-28', label: 'Helsinki' },
+  { date: '2023-02-01', label: 'First Yulia photo', color: '#f59e0b' },
+];
+
+async function init() {
+  const resp = await fetch('ekg_data.json');
+  data = await resp.json();
+  data.forEach(d => { d.c = d.n || d.c || 0; }); // normalize field name early
+  maxCount = Math.max(...data.map(d => d.c));
+
+  canvas = document.getElementById('main-canvas');
+  ctx = canvas.getContext('2d');
+  miniCanvas = document.getElementById('mini-canvas');
+  miniCtx = miniCanvas.getContext('2d');
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Fill gaps: create entries for all dates
+  const allDays = [];
+  if (data.length > 0) {
+    const start = new Date(data[0].d);
+    const end = new Date(data[data.length - 1].d);
+    const byDate = {};
+    data.forEach(d => { d.c = d.n || d.c || 0; byDate[d.d] = d; });
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const ds = d.toISOString().slice(0, 10);
+      allDays.push(byDate[ds] || { d: ds, c: 0, fc: 0, r: 0 });
+    }
+  }
+  data = allDays;
+  maxScroll = Math.max(0, data.length * PX_PER_DAY - canvas.width + 100);
+
+  // Compute 7-day rolling average
+  data.forEach((d, i) => {
+    let sum = 0, cnt = 0;
+    for (let j = Math.max(0, i - 3); j <= Math.min(data.length - 1, i + 3); j++) {
+      sum += data[j].c; cnt++;
+    }
+    d.avg = sum / cnt;
+    // Face ratio
+    d.faceRatio = d.c > 0 ? Math.min(d.fc / d.c, 1) : 0;
+  });
+
+  // Scroll to most recent data
+  scrollX = maxScroll;
+
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseup', () => isDragging = false);
+  canvas.addEventListener('click', onClick);
+  miniCanvas.addEventListener('click', onMiniClick);
+
+  drawMinimap();
+  requestAnimationFrame(animate);
+}
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight - 50;
+  miniCanvas.width = window.innerWidth;
+  miniCanvas.height = 50;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  draw();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const h = canvas.height * WAVEFORM_HEIGHT_RATIO;
+  const baseY = canvas.height * 0.7;
+  const maxAvg = Math.max(...data.map(d => d.avg));
+
+  // Grid lines
+  ctx.strokeStyle = '#0f0f18';
+  ctx.lineWidth = 1;
+  for (let y = baseY; y > baseY - h; y -= h / 5) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  // Year labels
+  ctx.fillStyle = '#1a1a2e';
+  ctx.font = '10px -apple-system, sans-serif';
+  let lastYear = '';
+  data.forEach((d, i) => {
+    const x = i * PX_PER_DAY - scrollX;
+    if (x < -10 || x > canvas.width + 10) return;
+    const year = d.d.slice(0, 4);
+    if (year !== lastYear) {
+      ctx.fillText(year, x, baseY + 20);
+      ctx.strokeStyle = '#1a1a2e';
+      ctx.beginPath(); ctx.moveTo(x, baseY - h); ctx.lineTo(x, baseY); ctx.stroke();
+      lastYear = year;
+    }
+  });
+
+  // Draw waveform — filled area
+  ctx.beginPath();
+  ctx.moveTo(-scrollX, baseY);
+  data.forEach((d, i) => {
+    const x = i * PX_PER_DAY - scrollX;
+    const y = baseY - (d.avg / maxAvg) * h;
+    if (i === 0) ctx.lineTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.lineTo((data.length - 1) * PX_PER_DAY - scrollX, baseY);
+  ctx.closePath();
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, baseY - h, 0, baseY);
+  grad.addColorStop(0, 'rgba(245,158,11,0.15)');
+  grad.addColorStop(1, 'rgba(245,158,11,0.02)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw the line itself with color varying by face ratio
+  ctx.lineWidth = 2;
+  for (let i = 1; i < data.length; i++) {
+    const x0 = (i - 1) * PX_PER_DAY - scrollX;
+    const x1 = i * PX_PER_DAY - scrollX;
+    if (x1 < -5 || x0 > canvas.width + 5) continue;
+
+    const y0 = baseY - (data[i-1].avg / maxAvg) * h;
+    const y1 = baseY - (data[i].avg / maxAvg) * h;
+
+    // Color: amber (social) → blue (solo)
+    const fr = data[i].faceRatio;
+    const r = Math.round(59 + fr * 186);  // 59→245
+    const g = Math.round(130 - fr * 28);   // 130→102 (blueish → amber)
+    const b = Math.round(246 - fr * 235);  // 246→11
+
+    // Width: thicker for more radius (travel)
+    const radiusWidth = 1 + Math.min(data[i].r, 10) / 10 * 3;
+
+    ctx.strokeStyle = `rgb(${r},${g},${b})`;
+    ctx.lineWidth = radiusWidth;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
+
+  // Daily dots on zoom
+  if (PX_PER_DAY >= 3) {
+    data.forEach((d, i) => {
+      if (d.c === 0) return;
+      const x = i * PX_PER_DAY - scrollX;
+      if (x < -5 || x > canvas.width + 5) return;
+      const y = baseY - (d.avg / maxAvg) * h;
+      ctx.beginPath();
+      ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = d.c > maxCount * 0.3 ? '#f59e0b' : '#555';
+      ctx.globalAlpha = 0.5;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // Annotations
+  ANNOTATIONS.forEach(ann => {
+    const idx = data.findIndex(d => d.d === ann.date);
+    if (idx < 0) return;
+    const x = idx * PX_PER_DAY - scrollX;
+    if (x < -50 || x > canvas.width + 50) return;
+    const y = baseY - (data[idx].avg / maxAvg) * h;
+
+    ctx.strokeStyle = ann.color || '#f59e0b';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, y - 10);
+    ctx.lineTo(x, y - 40);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = ann.color || '#f59e0b';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.globalAlpha = 0.7;
+    ctx.fillText(ann.label, x + 4, y - 30);
+    ctx.globalAlpha = 1;
+  });
+
+  // Minimap viewport indicator
+  drawMinimapViewport();
+}
+
+function drawMinimap() {
+  miniCtx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
+  if (data.length === 0) return;
+
+  const maxAvg = Math.max(...data.map(d => d.avg));
+  const pxPerDay = miniCanvas.width / data.length;
+
+  miniCtx.beginPath();
+  miniCtx.moveTo(0, miniCanvas.height);
+  data.forEach((d, i) => {
+    const x = i * pxPerDay;
+    const y = miniCanvas.height - (d.avg / maxAvg) * miniCanvas.height * 0.8;
+    miniCtx.lineTo(x, y);
+  });
+  miniCtx.lineTo(miniCanvas.width, miniCanvas.height);
+  miniCtx.closePath();
+  miniCtx.fillStyle = 'rgba(245,158,11,0.15)';
+  miniCtx.fill();
+  miniCtx.strokeStyle = 'rgba(245,158,11,0.3)';
+  miniCtx.lineWidth = 1;
+  miniCtx.stroke();
+}
+
+function drawMinimapViewport() {
+  const totalWidth = data.length * PX_PER_DAY;
+  const viewFrac = canvas.width / totalWidth;
+  const scrollFrac = scrollX / totalWidth;
+
+  miniCtx.clearRect(0, 0, miniCanvas.width, miniCanvas.height);
+  drawMinimap();
+
+  miniCtx.fillStyle = 'rgba(245,158,11,0.08)';
+  miniCtx.fillRect(scrollFrac * miniCanvas.width, 0, viewFrac * miniCanvas.width, miniCanvas.height);
+  miniCtx.strokeStyle = 'rgba(245,158,11,0.3)';
+  miniCtx.lineWidth = 1;
+  miniCtx.strokeRect(scrollFrac * miniCanvas.width, 0, viewFrac * miniCanvas.width, miniCanvas.height);
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  scrollX += e.deltaX || e.deltaY;
+  scrollX = Math.max(0, Math.min(scrollX, maxScroll));
+}
+
+function onMouseDown(e) {
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragScrollX = scrollX;
+}
+
+function onMouseMove(e) {
+  if (isDragging) {
+    scrollX = dragScrollX - (e.clientX - dragStartX);
+    scrollX = Math.max(0, Math.min(scrollX, maxScroll));
+    return;
+  }
+
+  // Tooltip
+  const idx = Math.round((e.clientX + scrollX) / PX_PER_DAY);
+  if (idx >= 0 && idx < data.length) {
+    const d = data[idx];
+    const tt = document.getElementById('tooltip');
+    tt.innerHTML = `<span style="color:#ccc">${d.d}</span><br>` +
+      `<span style="color:#f59e0b">${d.c} photos</span>` +
+      (d.fc > 0 ? `<br><span style="color:#10b981">${d.fc} faces</span>` : '') +
+      (d.r > 0 ? `<br><span style="color:#3b82f6">${d.r}km radius</span>` : '');
+    tt.style.display = 'block';
+    tt.style.left = Math.min(e.clientX + 12, window.innerWidth - 200) + 'px';
+    tt.style.top = (e.clientY - 70) + 'px';
+  }
+}
+
+function onClick(e) {
+  if (isDragging && Math.abs(e.clientX - dragStartX) > 5) return;
+
+  const idx = Math.round((e.clientX + scrollX) / PX_PER_DAY);
+  if (idx >= 0 && idx < data.length && data[idx].c > 0) {
+    showDayPhotos(data[idx].d, data[idx].c);
+  }
+}
+
+function onMiniClick(e) {
+  const frac = e.clientX / miniCanvas.width;
+  scrollX = frac * data.length * PX_PER_DAY - canvas.width / 2;
+  scrollX = Math.max(0, Math.min(scrollX, maxScroll));
+}
+
+async function showDayPhotos(dateStr, count) {
+  document.getElementById('day-label').textContent = `${dateStr} — ${count} photos`;
+  const thumbs = document.getElementById('day-thumbs');
+  thumbs.innerHTML = '';
+
+  try {
+    const resp = await fetch('replay_data.json');
+    const all = await resp.json();
+    const dayPhotos = all.filter(p => p.t && p.t.startsWith(dateStr));
+
+    dayPhotos.slice(0, 20).forEach(p => {
+      const img = document.createElement('img');
+      img.src = `${THUMB_BASE}/${p.id}.jpg`;
+      img.crossOrigin = 'anonymous';
+      img.onerror = () => img.style.display = 'none';
+      thumbs.appendChild(img);
+    });
+  } catch(e) {
+    thumbs.innerHTML = '<span style="color:#555">Could not load</span>';
+  }
+
+  document.getElementById('day-photos').classList.add('active');
+}
+
+init();
+</script>
+</body>
+</html>

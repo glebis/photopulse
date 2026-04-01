@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Life Replay — GPS Timelapse</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #040407; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; }
+
+#map { width: 100vw; height: 100vh; }
+
+#controls {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; display: flex; gap: 8px; align-items: center;
+  background: rgba(10,10,20,0.9); padding: 10px 20px; border-radius: 20px;
+  border: 1px solid #222; backdrop-filter: blur(8px);
+}
+.ctrl-btn {
+  background: rgba(255,255,255,0.05); border: 1px solid #333;
+  color: #666; padding: 6px 14px; border-radius: 12px;
+  font-size: 12px; cursor: pointer; transition: all 0.2s;
+}
+.ctrl-btn:hover { border-color: #666; color: #aaa; }
+.ctrl-btn.active { border-color: #f59e0b; color: #f59e0b; }
+
+#time-display {
+  position: fixed; top: 20px; right: 20px; z-index: 1000;
+  font-size: 18px; color: #f59e0b; font-variant-numeric: tabular-nums;
+  background: rgba(10,10,20,0.8); padding: 8px 16px; border-radius: 12px;
+  border: 1px solid #222;
+}
+
+#progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000;
+  background: #111;
+}
+#progress-bar { height: 100%; background: #f59e0b; width: 0; transition: width 0.1s; }
+
+#photo-count {
+  position: fixed; top: 20px; left: 20px; z-index: 1000;
+  font-size: 12px; color: #444;
+}
+
+#back { position: fixed; top: 50px; left: 20px; z-index: 1000; }
+#back a { color: #444; text-decoration: none; font-size: 12px; }
+#back a:hover { color: #f59e0b; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="progress"><div id="progress-bar"></div></div>
+
+<div id="time-display">Loading...</div>
+<div id="photo-count"></div>
+<div id="back"><a href="/">&larr; Explorer</a></div>
+
+<div id="controls">
+  <div class="ctrl-btn" onclick="togglePlay()" id="play-btn">&#9654; Play</div>
+  <div class="ctrl-btn" data-speed="100" onclick="setSpeed(100, this)">100x</div>
+  <div class="ctrl-btn active" data-speed="1000" onclick="setSpeed(1000, this)">1000x</div>
+  <div class="ctrl-btn" data-speed="5000" onclick="setSpeed(5000, this)">5000x</div>
+  <div class="ctrl-btn" data-speed="20000" onclick="setSpeed(20000, this)">20000x</div>
+  <div class="ctrl-btn" onclick="restart()">&#8634; Reset</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const THUMB_BASE = `http://${location.hostname}:8080`;
+
+let photos = [];
+let map, dotMarker, trailLine;
+let currentIdx = 0;
+let playing = false;
+let speed = 1000; // seconds of real time per animation frame
+let lastFrameTime = 0;
+let droppedMarkers = [];
+const MAX_TRAIL_POINTS = 500;
+const MAX_DROPPED = 200;
+
+async function init() {
+  // Dark map
+  map = L.map('map', {
+    center: [52.52, 13.40],
+    zoom: 11,
+    zoomControl: false,
+  });
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OSM &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // Load data
+  const resp = await fetch('replay_data.json');
+  photos = await resp.json();
+  document.getElementById('photo-count').textContent = `${photos.length.toLocaleString()} photos`;
+
+  // Create glowing dot
+  const dotIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:12px;height:12px;background:#f59e0b;border-radius:50%;box-shadow:0 0 12px #f59e0b,0 0 24px rgba(245,158,11,0.4);"></div>',
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+  });
+  dotMarker = L.marker([photos[0].lat, photos[0].lon], { icon: dotIcon }).addTo(map);
+
+  // Trail line
+  trailLine = L.polyline([], {
+    color: '#f59e0b',
+    weight: 2,
+    opacity: 0.3,
+    smoothFactor: 1,
+  }).addTo(map);
+
+  document.getElementById('time-display').textContent = photos[0].t.slice(0, 10);
+
+  // Center map on first photo
+  map.setView([photos[0].lat, photos[0].lon], 12);
+
+  // Start animation loop (but don't auto-play — let user press play)
+  lastFrameTime = performance.now();
+  requestAnimationFrame(animate);
+}
+
+function animate(now) {
+  requestAnimationFrame(animate);
+
+  if (!playing || photos.length === 0) return;
+
+  const dt = (now - lastFrameTime) / 1000; // seconds
+  lastFrameTime = now;
+  if (dt > 0.5) return; // skip large gaps (tab switch)
+
+  // How many seconds of real time to advance
+  const realSeconds = dt * speed;
+
+  // Find photos within the time window
+  const currentTime = new Date(photos[currentIdx].t).getTime();
+  const targetTime = currentTime + realSeconds * 1000;
+
+  while (currentIdx < photos.length - 1) {
+    const nextTime = new Date(photos[currentIdx + 1].t).getTime();
+    if (nextTime > targetTime) break;
+    currentIdx++;
+    processPhoto(currentIdx);
+  }
+
+  // Update progress
+  const progress = currentIdx / (photos.length - 1);
+  document.getElementById('progress-bar').style.width = (progress * 100) + '%';
+
+  // Update time display
+  const p = photos[currentIdx];
+  document.getElementById('time-display').textContent = p.t.slice(0, 10);
+
+  // Move dot
+  dotMarker.setLatLng([p.lat, p.lon]);
+
+  // Loop
+  if (currentIdx >= photos.length - 1) {
+    playing = false;
+    document.getElementById('play-btn').innerHTML = '&#9654; Play';
+  }
+}
+
+function processPhoto(idx) {
+  const p = photos[idx];
+
+  // Add to trail
+  const latlngs = trailLine.getLatLngs();
+  latlngs.push([p.lat, p.lon]);
+  if (latlngs.length > MAX_TRAIL_POINTS) latlngs.splice(0, latlngs.length - MAX_TRAIL_POINTS);
+  trailLine.setLatLngs(latlngs);
+
+  // Drop a photo marker (sampled — not every photo)
+  if (idx % 5 === 0) {
+    const size = 16;
+    const icon = L.divIcon({
+      className: '',
+      html: `<img src="${THUMB_BASE}/${p.id}.jpg" crossorigin="anonymous" style="width:${size}px;height:${size}px;border-radius:2px;opacity:0.6;border:1px solid #222;" onerror="this.style.display='none'">`,
+      iconSize: [size, size],
+      iconAnchor: [size/2, size/2],
+    });
+    const marker = L.marker([p.lat, p.lon], { icon, interactive: false }).addTo(map);
+    droppedMarkers.push(marker);
+
+    // Fade old markers
+    if (droppedMarkers.length > MAX_DROPPED) {
+      const old = droppedMarkers.shift();
+      map.removeLayer(old);
+    }
+  }
+
+  // Pan map if dot goes out of view (smooth)
+  if (!map.getBounds().contains([p.lat, p.lon])) {
+    map.panTo([p.lat, p.lon], { animate: true, duration: 0.5 });
+  }
+}
+
+function togglePlay() {
+  playing = !playing;
+  lastFrameTime = performance.now();
+  document.getElementById('play-btn').innerHTML = playing ? '&#9646;&#9646; Pause' : '&#9654; Play';
+}
+
+function setSpeed(s, btn) {
+  speed = s;
+  document.querySelectorAll('.ctrl-btn[data-speed]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function restart() {
+  currentIdx = 0;
+  trailLine.setLatLngs([]);
+  droppedMarkers.forEach(m => map.removeLayer(m));
+  droppedMarkers = [];
+  if (photos.length > 0) {
+    map.setView([photos[0].lat, photos[0].lon], 12);
+    dotMarker.setLatLng([photos[0].lat, photos[0].lon]);
+    document.getElementById('time-display').textContent = photos[0].t.slice(0, 10);
+  }
+  document.getElementById('progress-bar').style.width = '0';
+  playing = false;
+  document.getElementById('play-btn').innerHTML = '&#9654; Play';
+}
+
+init();
+</script>
+</body>
+</html>

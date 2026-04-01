@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Embedding Explorer — Photos + Notes in Semantic Space</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #040407; font-family: -apple-system, sans-serif; color: #fff; }
+canvas { display: block; cursor: grab; }
+canvas:active { cursor: grabbing; }
+
+#controls {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 8px; z-index: 100; align-items: center;
+}
+.ctrl-btn {
+  background: rgba(255,255,255,0.04); border: 1px solid #333;
+  color: #555; padding: 6px 14px; border-radius: 14px;
+  font-size: 12px; cursor: pointer; transition: all 0.2s; user-select: none;
+}
+.ctrl-btn:hover { border-color: #666; color: #aaa; }
+.ctrl-btn.active { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,0.08); }
+.ctrl-btn.off { opacity: 0.3; }
+
+#search-box {
+  background: rgba(255,255,255,0.04); border: 1px solid #333;
+  color: #ccc; padding: 6px 14px; border-radius: 14px;
+  font-size: 12px; outline: none; width: 200px;
+  font-family: -apple-system, sans-serif;
+}
+#search-box:focus { border-color: #f59e0b; }
+#search-box::placeholder { color: #444; }
+
+#tooltip {
+  position: fixed; display: none; z-index: 200;
+  background: rgba(10,10,20,0.95); border: 1px solid #333;
+  padding: 10px 14px; border-radius: 8px; pointer-events: none;
+  font-size: 12px; line-height: 1.5; max-width: 320px;
+  backdrop-filter: blur(8px);
+}
+.tt-title { color: #ccc; font-size: 13px; font-weight: 500; }
+.tt-meta { color: #666; font-size: 11px; margin-top: 4px; }
+.tt-preview { margin-top: 6px; }
+.tt-preview img { max-width: 120px; max-height: 90px; border-radius: 4px; }
+.tt-text { color: #555; font-size: 10px; margin-top: 4px; max-height: 60px; overflow: hidden; line-height: 1.4; }
+
+#detail-panel {
+  position: fixed; top: 0; right: -400px; width: 380px; height: 100vh;
+  background: rgba(10,10,15,0.95); border-left: 1px solid #222;
+  z-index: 300; padding: 20px; overflow-y: auto;
+  transition: right 0.3s ease; backdrop-filter: blur(12px);
+}
+#detail-panel.open { right: 0; }
+#detail-close {
+  position: absolute; top: 12px; right: 16px; color: #444;
+  cursor: pointer; font-size: 18px; transition: color 0.2s;
+}
+#detail-close:hover { color: #fff; }
+#detail-title { font-size: 18px; color: #f0f0f5; margin-bottom: 12px; font-weight: 600; }
+#detail-meta { font-size: 13px; color: #aaa; margin-bottom: 16px; line-height: 1.6; }
+#detail-image { max-width: 100%; border-radius: 6px; margin-bottom: 12px; }
+
+#detail-text h1, #detail-text h2, #detail-text h3 { color: #e0e0ea; margin: 12px 0 6px; font-weight: 600; }
+#detail-text h1 { font-size: 16px; }
+#detail-text h2 { font-size: 14px; }
+#detail-text h3 { font-size: 13px; color: #aaa; }
+#detail-text p { margin: 6px 0; }
+#detail-text ul, #detail-text ol { padding-left: 18px; margin: 6px 0; }
+#detail-text li { margin: 3px 0; }
+#detail-text code { font-family: monospace; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+#detail-text pre { background: rgba(255,255,255,0.04); border: 1px solid #1a1a2e; border-radius: 6px; padding: 10px; margin: 8px 0; overflow-x: auto; }
+#detail-text pre code { background: none; padding: 0; }
+#detail-text blockquote { border-left: 2px solid #f59e0b; padding: 4px 12px; margin: 8px 0; color: #aaa; font-style: italic; }
+#detail-text a { color: #3b82f6; text-decoration: none; }
+#detail-text strong { color: #f0f0f5; }
+#detail-text img { max-width: 100%; border-radius: 4px; }
+
+#detail-text {
+  font-size: 13px; color: #ccc; line-height: 1.7; white-space: pre-wrap;
+  font-family: -apple-system, sans-serif;
+}
+#detail-neighbors { margin-top: 20px; }
+#detail-neighbors h4 { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+.neighbor-item {
+  padding: 6px 0; border-bottom: 1px solid #1a1a2e; font-size: 12px;
+  color: #ccc; cursor: pointer; transition: color 0.2s;
+}
+.neighbor-item:hover { color: #f59e0b; }
+.neighbor-score { color: #f59e0b; float: right; }
+
+#stats {
+  position: fixed; bottom: 16px; left: 16px; z-index: 100;
+  font-size: 11px; color: #555;
+}
+
+#back { position: fixed; top: 16px; left: 16px; z-index: 100; }
+#back a { color: #444; text-decoration: none; font-size: 12px; }
+#back a:hover { color: #f59e0b; }
+
+#neighbor-lines {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  z-index: 5; pointer-events: none;
+}
+#breadcrumbs {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 100; display: none; gap: 4px; align-items: center;
+  background: rgba(10,10,20,0.85); padding: 6px 12px; border-radius: 14px;
+  border: 1px solid #222; max-width: 80vw; overflow-x: auto;
+}
+#breadcrumbs.active { display: flex; }
+.bc-item {
+  font-size: 10px; color: #666; cursor: pointer; white-space: nowrap;
+  padding: 2px 6px; border-radius: 8px; transition: all 0.2s;
+}
+.bc-item:hover { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.bc-item.current { color: #ccc; }
+.bc-sep { color: #333; font-size: 10px; }
+#focus-label {
+  position: fixed; top: 52px; left: 50%; transform: translateX(-50%);
+  z-index: 100; font-size: 10px; color: #f59e0b; letter-spacing: 1px;
+  text-transform: uppercase; display: none;
+}
+
+#settings-panel {
+  position: fixed; top: 0; right: -320px; width: 310px; height: 100vh;
+  background: rgba(4,4,7,0.94); border-left: 1px solid #1a1a2e;
+  z-index: 400; padding: 16px; overflow-y: auto;
+  transition: right 0.3s ease; backdrop-filter: blur(12px);
+}
+#settings-panel.open { right: 0; }
+#settings-panel h3 { font-size: 11px; color: #555; letter-spacing: 1px; text-transform: uppercase; margin: 14px 0 8px; }
+#settings-panel h3:first-child { margin-top: 0; }
+.preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 12px; }
+.preset-btn {
+  background: rgba(255,255,255,0.03); border: 1px solid #222; color: #444;
+  padding: 5px 2px; border-radius: 6px; font-size: 9px; cursor: pointer;
+  transition: all 0.2s; text-align: center; line-height: 1.2;
+}
+.preset-btn:hover { border-color: #555; color: #aaa; }
+.preset-btn.active { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,0.06); }
+.s-row { margin-bottom: 8px; }
+.s-label { display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-bottom: 2px; }
+.s-label .val { color: #666; font-variant-numeric: tabular-nums; }
+.s-row input[type=range] {
+  width: 100%; height: 3px; -webkit-appearance: none; background: #1a1a2e;
+  border-radius: 2px; outline: none;
+}
+.s-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  background: #f59e0b; border-radius: 50%; cursor: pointer;
+}
+
+#face-filters { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.face-btn {
+  background: rgba(245,158,11,0.06); border: 1px solid #333; color: #666;
+  padding: 3px 8px; border-radius: 10px; font-size: 10px; cursor: pointer;
+}
+.face-btn:hover { border-color: #f59e0b; color: #f59e0b; }
+.face-btn.active { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,0.12); }
+
+#date-slider-container {
+  position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+  width: 80%; z-index: 100; display: flex; align-items: center; gap: 8px;
+}
+#date-slider { width: 100%; -webkit-appearance: none; height: 3px; background: #1a1a2e; border-radius: 2px; }
+#date-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px;
+  background: #f59e0b; border-radius: 50%; cursor: pointer;
+}
+#date-label { font-size: 11px; color: #666; min-width: 70px; text-align: center; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+<div id="back"><a href="/">&larr; Hub</a></div>
+
+<div id="controls">
+  <div class="ctrl-btn active" id="btn-photos" onclick="toggleFilter('photos')">Photos</div>
+  <div class="ctrl-btn active" id="btn-notes" onclick="toggleFilter('notes')">Notes</div>
+  <input type="text" id="search-box" placeholder="Search embeddings...">
+  <div class="ctrl-btn" onclick="surprise()">Surprise</div>
+  <div class="ctrl-btn" onclick="startExplore()">Explore</div>
+  <div class="ctrl-btn" id="btn-grid" onclick="toggleGrid()">Grid (G)</div>
+  <div class="ctrl-btn" onclick="toggleSettings()">Settings (P)</div>
+  <div class="ctrl-btn" id="btn-date" onclick="toggleDateSlider()">Timeline (D)</div>
+</div>
+
+<div id="face-buttons" style="position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:90;display:flex;gap:4px;"></div>
+
+<div id="date-slider-container" style="position:fixed;bottom:40px;left:80px;right:80px;z-index:90;display:flex;align-items:center;gap:8px;">
+  <span id="date-label" style="font-size:10px;color:#555;min-width:80px;text-align:center;"></span>
+  <input type="range" id="date-slider" min="0" max="1" step="0.001" value="1"
+    style="flex:1;height:3px;-webkit-appearance:none;background:#1a1a2e;border-radius:2px;outline:none;">
+  <span id="date-range-label" style="font-size:10px;color:#333;min-width:50px;">All</span>
+</div>
+
+
+<div id="tooltip">
+  <div class="tt-title"></div>
+  <div class="tt-meta"></div>
+  <div class="tt-preview"></div>
+  <div class="tt-text"></div>
+</div>
+
+<canvas id="neighbor-lines"></canvas>
+
+<div id="detail-panel">
+  <div id="detail-close" onclick="closeDetail()">&times;</div>
+  <img id="detail-image" src="" style="display:none">
+  <div id="detail-title"></div>
+  <div id="detail-meta"></div>
+  <div id="detail-text"></div>
+  <div id="detail-neighbors">
+    <h4>Nearest neighbors</h4>
+    <div id="neighbor-list"></div>
+  </div>
+</div>
+
+<div id="breadcrumbs"></div>
+<div id="focus-label">Focus mode — Esc to exit</div>
+
+<div id="settings-panel">
+  <h3>Presets</h3>
+  <div class="preset-grid" id="emb-presets"></div>
+  <h3>Parameters</h3>
+  <div id="emb-sliders"></div>
+  <h3>People</h3>
+  <div id="face-filters"></div>
+</div>
+
+<div id="date-slider-container" style="display:none">
+  <span id="date-label">All time</span>
+  <input type="range" id="date-slider" min="2005" max="2026" step="0.01" value="2026">
+</div>
+
+<div id="stats"></div>
+<div style="position:fixed;bottom:16px;right:16px;z-index:100;font-size:10px;color:#333;text-align:right;line-height:1.6">
+  <span style="color:#555">Scroll</span> zoom · <span style="color:#555">Drag</span> pan · <span style="color:#555">Click</span> focus ·
+  <span style="color:#555">L</span> spotlight · <span style="color:#555">G</span> grid · <span style="color:#555">Esc</span> back
+</div>
+
+<script>
+const THUMB_BASE = `http://${location.hostname}:8080`;
+
+let canvas, ctx, linesCanvas, linesCtx;
+let items = [];
+let viewX = 0, viewY = 0, viewScale = 1;
+let isDragging = false, dragStartX = 0, dragStartY = 0, dragViewX = 0, dragViewY = 0;
+let hoveredItem = null, selectedItem = null;
+let showPhotos = true, showNotes = true;
+let searchResults = null; // set of IDs to highlight
+let neighborLines = []; // [{from, to}]
+let focusMode = false;
+let focusSet = new Set(); // IDs visible in focus mode
+let breadcrumbs = []; // [{id, title}]
+let thumbCache = {}; // id → {img, lastUsed}
+let thumbPending = new Set(); // dedup in-flight loads
+let activeLoads = 0;
+const MAX_THUMB_CACHE = 1500;
+let gridMode = false;
+let umapPositions = {};
+let spotlightMode = true;
+let mouseScreenX = 0, mouseScreenY = 0;
+let layerMode = 3;
+let settingsOpen = false;
+let faceFilter = null;
+let dateFilterPos = 1;
+let dateFilterActive = false;
+let dateFilterValue = 2025.0;
+let itemsById = new Map(); // fast lookup
+let lastHoverId = null; // tooltip dedup
+let needsRedraw = true; // invalidation flag
+
+// Spatial index
+let spatialGrid = new Map();
+const GRID_CELL = 8;
+
+function buildSpatialGrid() {
+  spatialGrid.clear();
+  items.forEach((item, i) => {
+    const gx = Math.floor(item.x / GRID_CELL);
+    const gy = Math.floor(item.y / GRID_CELL);
+    const key = `${gx},${gy}`;
+    if (!spatialGrid.has(key)) spatialGrid.set(key, []);
+    spatialGrid.get(key).push(i);
+  });
+}
+
+function queryRect(x1, y1, x2, y2) {
+  const gx1 = Math.floor(x1 / GRID_CELL) - 1;
+  const gy1 = Math.floor(y1 / GRID_CELL) - 1;
+  const gx2 = Math.ceil(x2 / GRID_CELL) + 1;
+  const gy2 = Math.ceil(y2 / GRID_CELL) + 1;
+  const result = [];
+  for (let gx = gx1; gx <= gx2; gx++) {
+    for (let gy = gy1; gy <= gy2; gy++) {
+      const cell = spatialGrid.get(`${gx},${gy}`);
+      if (cell) result.push(...cell);
+    }
+  }
+  return result;
+}
+
+function isLayerVisible(item) {
+  if (item.type === 'photo' && !showPhotos) return false;
+  if (item.type === 'note' && !showNotes) return false;
+  if (layerMode === 1 && item.type === 'note') return false;
+  if (layerMode === 2 && item.type === 'photo') return false;
+  return true;
+}
+
+function invalidate() { needsRedraw = true; }
+
+function evictLRUThumbs() {
+  const keys = Object.keys(thumbCache);
+  if (keys.length <= MAX_THUMB_CACHE) return;
+  const sorted = keys.sort((a, b) => (thumbCache[a].lastUsed || 0) - (thumbCache[b].lastUsed || 0));
+  const toRemove = sorted.slice(0, keys.length - MAX_THUMB_CACHE);
+  toRemove.forEach(k => {
+    if (thumbCache[k].img) thumbCache[k].img.src = '';
+    delete thumbCache[k];
+  });
+}
+
+// Settings parameters
+const S = {
+  spacing: 1, photoScale: 1, noteScale: 1,
+  spotlightR: 200, maxLabels: 20, dateWindow: 9999,
+};
+
+const PRESETS = {
+  'Overview':  { spacing: 2, photoScale: 0.6, noteScale: 0.5, spotlightR: 350, maxLabels: 10 },
+  'Reading':   { spacing: 1.2, photoScale: 0.8, noteScale: 1.5, spotlightR: 160, maxLabels: 30 },
+  'Gallery':   { spacing: 1.2, photoScale: 1.8, noteScale: 0.6, spotlightR: 250, maxLabels: 10 },
+  'Dense':     { spacing: 0.6, photoScale: 0.5, noteScale: 0.4, spotlightR: 100, maxLabels: 8 },
+  'Research':  { spacing: 1, photoScale: 0.4, noteScale: 1.3, spotlightR: 280, maxLabels: 25 },
+};
+
+const PARAM_DEFS = [
+  { key: 'spacing', label: 'Spacing', min: 0.5, max: 3, step: 0.1 },
+  { key: 'photoScale', label: 'Photo Size', min: 0.3, max: 2, step: 0.1 },
+  { key: 'noteScale', label: 'Note Size', min: 0.3, max: 2, step: 0.1 },
+  { key: 'spotlightR', label: 'Spotlight Radius', min: 50, max: 400, step: 10 },
+  { key: 'maxLabels', label: 'Max Labels', min: 5, max: 50, step: 1 },
+];
+// Aliases for buildSettings references
+const SP = S;
+const EMPRESETS = PRESETS;
+
+async function init() {
+  canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;top:0;left:0;z-index:10;';
+  document.body.appendChild(canvas);
+  ctx = canvas.getContext('2d');
+
+  linesCanvas = document.getElementById('neighbor-lines');
+  linesCtx = linesCanvas.getContext('2d');
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Progressive loading: summary first (positions only), then full data in background
+  const summaryResp = await fetch('embeddings_summary.json');
+  items = await summaryResp.json();
+
+  const photos = items.filter(i => i.type === 'photo').length;
+  const notes = items.filter(i => i.type === 'note').length;
+  document.getElementById('stats').textContent = `${items.length} items (${photos} photos, ${notes} notes)`;
+
+  // Stream full data in background (has note text, GPS, faces, objects)
+  fetch('embeddings_2d.json').then(r => r.json()).then(fullItems => {
+    const fullMap = {};
+    fullItems.forEach(i => fullMap[i.id] = i);
+    items.forEach((item, idx) => {
+      const full = fullMap[item.id];
+      if (full) Object.assign(item, full); // merge full data into existing items
+    });
+    document.getElementById('stats').textContent += ' (full data loaded)';
+  }).catch(() => {}); // summary is sufficient if full fails
+
+  // Build indexes
+  items.forEach(i => itemsById.set(i.id, i));
+  buildSpatialGrid();
+
+  // Auto-fit
+  autoFit();
+
+  canvas.addEventListener('mousedown', e => { isDragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragViewX = viewX; dragViewY = viewY; });
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseup', () => isDragging = false);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('click', onClick);
+
+  document.getElementById('search-box').addEventListener('keydown', e => {
+    if (e.code === 'Enter') doSearch(e.target.value);
+    if (e.code === 'Escape') { e.target.value = ''; searchResults = null; e.target.blur(); }
+  });
+  window.addEventListener('keydown', e => {
+    if (document.activeElement.tagName === 'INPUT') return;
+    if (e.code === 'Escape') {
+      if (focusMode) { e.preventDefault(); exitFocus(); }
+      else if (spotlightMode) { e.preventDefault(); spotlightMode = false; }
+    }
+    if (e.code === 'KeyG' && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); toggleGrid(); }
+    if (e.code === 'KeyL') { e.preventDefault(); spotlightMode = !spotlightMode; }
+    if (e.code === 'KeyP') { e.preventDefault(); toggleSettings(); }
+    if (e.code === 'KeyD') { e.preventDefault(); toggleDateSlider(); }
+    if (e.code === 'KeyR' && !focusMode) { e.preventDefault(); if (gridMode) toggleGrid(); autoFit(); }
+    if (e.code === 'Home') { e.preventDefault(); autoFit(); }
+    // Arrow key navigation between neighbors
+    if (selectedItem && e.code === 'ArrowUp') { e.preventDefault(); navigateArrow(0, 1); }
+    if (selectedItem && e.code === 'ArrowDown') { e.preventDefault(); navigateArrow(0, -1); }
+    if (selectedItem && e.code === 'ArrowLeft') { e.preventDefault(); navigateArrow(-1, 0); }
+    if (selectedItem && e.code === 'ArrowRight') { e.preventDefault(); navigateArrow(1, 0); }
+  });
+
+  buildSettings();
+  requestAnimationFrame(animate);
+  setTimeout(() => { const ob = document.getElementById('onboarding'); if (ob) ob.style.opacity = '0'; }, 8000);
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  linesCanvas.width = window.innerWidth * dpr;
+  linesCanvas.height = window.innerHeight * dpr;
+  linesCanvas.style.width = window.innerWidth + 'px';
+  linesCanvas.style.height = window.innerHeight + 'px';
+  linesCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function autoFit() {
+  if (items.length === 0) return;
+  const xs = items.map(i => i.x);
+  const ys = items.map(i => i.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const dataW = maxX - minX || 1;
+  const dataH = maxY - minY || 1;
+  const w = window.innerWidth, h = window.innerHeight;
+  const padding = 0.85; // use 85% of screen
+  viewScale = Math.min(w * padding / dataW, h * padding / dataH);
+  viewX = w / 2 - ((minX + maxX) / 2) * viewScale;
+  viewY = h / 2 + ((minY + maxY) / 2) * viewScale;
+}
+
+function toggleGrid() {
+  gridMode = !gridMode;
+  document.getElementById('btn-grid').classList.toggle('active', gridMode);
+  if (focusMode) exitFocus();
+  if (gridMode) {
+    // Save UMAP positions
+    items.forEach(i => { umapPositions[i.id] = { x: i.x, y: i.y }; });
+    // Compute grid positions — use large offset to make visually distinct
+    const visible = items.filter(i =>
+      (i.type === 'photo' && showPhotos) || (i.type === 'note' && showNotes)
+    );
+    visible.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'photo' ? -1 : 1;
+      const aKey = a.type === 'photo' ? (a.captured || '') : (a.title || '');
+      const bKey = b.type === 'photo' ? (b.captured || '') : (b.title || '');
+      return aKey.localeCompare(bKey);
+    });
+    // Compute grid in world coords with large spacing (200+ range, very different from UMAP's -50..50)
+    const w = window.innerWidth, h = window.innerHeight;
+    const aspect = w / h;
+    const cols = Math.ceil(Math.sqrt(visible.length * aspect));
+    const rows = Math.ceil(visible.length / cols);
+    const cellSize = 8; // world units per cell — much larger than UMAP density
+    const gridW = cols * cellSize;
+    const gridH = rows * cellSize;
+    visible.forEach((item, idx) => {
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      item.x = (col - cols / 2) * cellSize;
+      item.y = -(row - rows / 2) * cellSize;
+    });
+    items.forEach(i => {
+      if (!visible.includes(i)) { i.x = 99999; i.y = 99999; }
+    });
+    // Fit view: items should be ~18px each with clear gaps
+    viewScale = Math.min(w * 0.92 / gridW, h * 0.88 / gridH);
+    viewX = w / 2;
+    viewY = h / 2;
+  } else {
+    // Restore UMAP positions
+    items.forEach(i => {
+      const saved = umapPositions[i.id];
+      if (saved) { i.x = saved.x; i.y = saved.y; }
+    });
+    autoFit();
+  }
+  buildSpatialGrid();
+  invalidate();
+}
+
+
+function worldToScreen(wx, wy) {
+  return [viewX + wx * viewScale, viewY - wy * viewScale];
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  if (!needsRedraw && !spotlightMode) return; // skip if nothing changed
+  needsRedraw = false;
+  draw();
+  drawLines();
+  // Load visible thumbnails periodically
+  if (Math.random() < 0.1) loadVisibleThumbs();
+}
+
+function draw() {
+  const w = window.innerWidth, h = window.innerHeight;
+  ctx.clearRect(0, 0, w, h);
+  const s = viewScale / 8;
+
+  // Label collision tracking + limit
+  const drawnLabels = [];
+  let labelCount = 0;
+  const MAX_LABELS = 20;
+  function canDrawLabel(x, y, lw, lh) {
+    if (labelCount >= SP.maxLabels) return false;
+    for (const l of drawnLabels) {
+      if (x < l.x + l.w && x + lw > l.x && y < l.y + l.h && y + lh > l.y) return false;
+    }
+    drawnLabels.push({ x, y, w: lw, h: lh });
+    labelCount++;
+    return true;
+  }
+  function drawLabel(text, x, y, fontSize, color) {
+    const tw = ctx.measureText(text).width;
+    if (!canDrawLabel(x - 2, y - fontSize, tw + 6, fontSize + 4)) return;
+    // Dark backdrop
+    ctx.fillStyle = 'rgba(4, 4, 7, 0.85)';
+    ctx.fillRect(x - 3, y - fontSize + 1, tw + 6, fontSize + 3);
+    // Text
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+  }
+  // In grid mode: fixed pixel sizes independent of viewScale
+  const cellPx = gridMode ? 8 * viewScale : 0; // actual pixel spacing between grid items
+  const photoSize = gridMode ? Math.max(cellPx * 0.7, 8) : Math.max(s * 14 * SP.photoSize, 4);
+  const noteSize = gridMode ? Math.max(cellPx * 0.5, 6) : Math.max(s * 10 * SP.noteSize, 3);
+
+  for (const item of items) {
+    if (item.type === 'photo' && !showPhotos) continue;
+    if (item.type === 'note' && !showNotes) continue;
+
+    const [sx, sy] = worldToScreen(item.x, item.y);
+    if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) continue;
+
+    const isSearch = searchResults && !searchResults.has(item.id);
+    const isHovered = hoveredItem === item;
+    const isSelected = selectedItem === item;
+
+    let alpha = isSearch ? 0.08 : isHovered ? 1 : isSelected ? 1 : 0.75;
+    // Face filter
+    if (faceFilter && item.type === 'photo') {
+      const faces = (item.faces || '').split(',');
+      if (!faces.includes(faceFilter)) alpha *= 0.05;
+    }
+    // Date filter
+    if (dateFilterActive) {
+      const itemDate = item.captured || item.title || '';
+      const m = itemDate.match(/(\d{4})/);
+      if (m) {
+        const itemYear = parseInt(m[1]) + (parseInt((itemDate.match(/-(\d{2})/)||[])[1]||'6') - 1) / 12;
+        if (Math.abs(itemYear - dateFilterValue) > 0.25) alpha *= 0.04;
+      }
+    }
+    // Spotlight: distance-based falloff from cursor
+    if (spotlightMode && !focusMode && !searchResults) {
+      const dist = Math.sqrt((sx - mouseScreenX)**2 + (sy - mouseScreenY)**2);
+      const spotAlpha = Math.max(0.15, 1 - (dist / SP.spotlightRadius) * (dist / SP.spotlightRadius));
+      alpha *= spotAlpha;
+    }
+    // Layer filtering
+    if (layerMode === 1 && item.type === 'note') alpha *= 0.06;
+    if (layerMode === 2 && item.type === 'photo') alpha *= 0.06;
+    if (focusMode && !focusSet.has(item.id)) alpha = 0.03;
+
+    // Compute cursor distance for spotlight-aware rendering
+    const spotDist = Math.sqrt((sx - mouseScreenX) ** 2 + (sy - mouseScreenY) ** 2);
+
+    if (item.type === 'photo') {
+      const sz = photoSize;
+      const thumbEntry = thumbCache[item.id];
+      const thumb = thumbEntry ? thumbEntry.img : null;
+      if (thumbEntry) thumbEntry.lastUsed = Date.now();
+      const showThumb = spotlightMode ? spotDist < SP.spotlightRadius * 0.8 : true;
+      if (thumb && thumb.complete && thumb.naturalWidth > 0 && sz > 18 && showThumb) {
+        const aspect = thumb.naturalWidth / thumb.naturalHeight;
+        const cw = sz * Math.sqrt(aspect);
+        const ch = sz / Math.sqrt(aspect);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(thumb, sx - cw/2, sy - ch/2, cw, ch);
+        if (isSelected) {
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(sx - cw/2, sy - ch/2, cw, ch);
+        }
+      } else {
+        // Amber dot — larger for visibility
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.fillStyle = '#f59e0b';
+        const r = Math.max(sz * 0.2, 3.5);
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // Note card
+      const sz = noteSize;
+      ctx.globalAlpha = alpha * 0.8;
+
+      // Folder-based color
+      const folder = item.folder || '';
+      let color = '#6366f1'; // default indigo
+      if (folder.includes('Daily')) color = '#3b82f6';
+      else if (folder.includes('People')) color = '#10b981';
+      else if (folder.includes('Source')) color = '#8b5cf6';
+      else if (folder.includes('Psycho')) color = '#ec4899';
+      else if (folder.includes('Ideas')) color = '#f59e0b';
+
+      ctx.fillStyle = color;
+
+      const nearCursor = Math.sqrt((sx - mouseScreenX)**2 + (sy - mouseScreenY)**2) < 160;
+      if (sz > 14 || (spotlightMode && nearCursor && sz > 6)) {
+        // Zoomed in: card with title + preview
+        const fontSize = Math.max(sz * 0.4, 12);
+        const title = (item.title || '').slice(0, 30);
+        ctx.font = `${fontSize}px -apple-system, sans-serif`;
+        const tw = Math.max(ctx.measureText(title).width + 12, sz * 1.2);
+        const showPreview = sz > 24 && item.text;
+        const th = showPreview ? sz * 1.0 : sz * 0.6;
+        const rx = sx - tw/2, ry = sy - th/2;
+
+        ctx.globalAlpha = alpha * 0.08;
+        ctx.fillRect(rx, ry, tw, th);
+        // Title with backdrop + collision avoidance
+        if (alpha > 0.1) {
+          ctx.globalAlpha = alpha;
+          ctx.font = `${fontSize}px -apple-system, sans-serif`;
+          drawLabel(title, rx + 6, ry + fontSize + 3, fontSize, '#e0e0ea');
+        }
+
+        if (showPreview && alpha > 0.3) {
+          ctx.globalAlpha = alpha * 0.7;
+          const prevFont = Math.max(fontSize * 0.75, 10);
+          ctx.font = `${prevFont}px -apple-system, sans-serif`;
+          const preview = (item.text || '').replace(/[#\-*>\[\]]/g, '').trim().slice(0, 60);
+          drawLabel(preview, rx + 6, ry + fontSize * 2 + 4, prevFont, '#8888a0');
+        }
+      } else if (sz > 6) {
+        // Medium zoom: dot with tiny title
+        const r = Math.max(sz * 0.25, 3);
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+        // Tiny title with backdrop (only if visible enough)
+        if (alpha > 0.1) {
+          ctx.globalAlpha = alpha * 0.8;
+          const tinyFont = Math.max(sz * 0.35, 10);
+          ctx.font = `${tinyFont}px -apple-system, sans-serif`;
+          drawLabel((item.title || '').slice(0, 15), sx + r + 3, sy + 3, tinyFont, '#c0c0d0');
+        }
+
+        if (isSelected) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = 0.8;
+          ctx.beginPath();
+          ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else {
+        // Small dot
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(sz * 0.2, 2), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawLines() {
+  linesCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  if (!neighborLines.length) return;
+
+  for (const line of neighborLines) {
+    const from = itemsById.get(line.from);
+    const to = itemsById.get(line.to);
+    if (!from || !to) continue;
+
+    const [fx, fy] = worldToScreen(from.x, from.y);
+    const [tx, ty] = worldToScreen(to.x, to.y);
+
+    // Temporal cross-modal links: white dashed
+    const isTemporal = line.temporal;
+
+    linesCtx.beginPath();
+    linesCtx.moveTo(fx, fy);
+    linesCtx.lineTo(tx, ty);
+    if (isTemporal) {
+      linesCtx.strokeStyle = 'rgba(255,255,255,0.25)';
+      linesCtx.lineWidth = 1;
+      linesCtx.setLineDash([4, 4]);
+    } else {
+      linesCtx.strokeStyle = to.type === 'photo' ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.25)';
+      linesCtx.lineWidth = 1.5;
+      linesCtx.setLineDash([]);
+    }
+    linesCtx.stroke();
+    linesCtx.setLineDash([]);
+
+    // Dot at target
+    linesCtx.beginPath();
+    linesCtx.arc(tx, ty, 3, 0, Math.PI * 2);
+    linesCtx.fillStyle = to.type === 'photo' ? '#f59e0b' : '#6366f1';
+    linesCtx.globalAlpha = 0.5;
+    linesCtx.fill();
+
+    // Similarity score at midpoint
+    if (focusMode) {
+      const dist = Math.sqrt((from.x - to.x)**2 + (from.y - to.y)**2);
+      const score = (1 / (1 + dist)).toFixed(2);
+      const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+      linesCtx.globalAlpha = 0.4;
+      linesCtx.fillStyle = '#aaa';
+      linesCtx.font = '9px -apple-system, sans-serif';
+      linesCtx.fillText(score, mx + 3, my - 3);
+    }
+  }
+
+  // Draw temporal cross-modal links (photo ↔ same-day note)
+  if (selectedItem) {
+    const tempLinks = getTemporalLinks(selectedItem);
+    for (const link of tempLinks) {
+      const from = itemsById.get(link.from);
+      const to = itemsById.get(link.to);
+      if (!from || !to) continue;
+      const [fx, fy] = worldToScreen(from.x, from.y);
+      const [tx, ty] = worldToScreen(to.x, to.y);
+      linesCtx.beginPath();
+      linesCtx.moveTo(fx, fy);
+      linesCtx.lineTo(tx, ty);
+      linesCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+      linesCtx.lineWidth = 1;
+      linesCtx.setLineDash([4, 4]);
+      linesCtx.stroke();
+      linesCtx.setLineDash([]);
+    }
+  }
+
+  linesCtx.globalAlpha = 1;
+}
+
+function loadVisibleThumbs() {
+  if (activeLoads > 30) return;
+  const w = window.innerWidth, h = window.innerHeight;
+  const s = viewScale / 8;
+  const minSize = 10;
+
+  // Use spatial index for viewport query
+  const wx1 = (0 - viewX) / viewScale;
+  const wy1 = -(0 - viewY) / viewScale;
+  const wx2 = (w - viewX) / viewScale;
+  const wy2 = -(h - viewY) / viewScale;
+  const visibleIndices = queryRect(Math.min(wx1,wx2), Math.min(wy1,wy2), Math.max(wx1,wx2), Math.max(wy1,wy2));
+
+  for (const idx of visibleIndices) {
+    const item = items[idx];
+    if (item.type !== 'photo') continue;
+    if (!isLayerVisible(item)) continue;
+    if (thumbCache[item.id] || thumbPending.has(item.id)) continue;
+
+    const photoSize = Math.max(s * 30, 4);
+    if (photoSize < minSize) continue;
+
+    thumbPending.add(item.id);
+    activeLoads++;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const id = item.id;
+    img.onload = () => {
+      thumbCache[id] = { img, lastUsed: Date.now() };
+      thumbPending.delete(id);
+      activeLoads--;
+      invalidate();
+      evictLRUThumbs();
+    };
+    img.onerror = () => {
+      thumbPending.delete(id);
+      activeLoads--;
+    };
+    img.src = `${THUMB_BASE}/${id}.jpg`;
+
+    if (activeLoads > 30) break;
+  }
+}
+
+function findItemAt(mx, my) {
+  const s = viewScale / 8;
+  const hitR = Math.max(s * 15, 8);
+  // Convert screen coords to world coords for spatial query
+  const wx = (mx - viewX) / viewScale;
+  const wy = -(my - viewY) / viewScale;
+  const worldR = hitR / viewScale;
+  const nearby = queryRect(wx - worldR, wy - worldR, wx + worldR, wy + worldR);
+
+  let best = null, bestDist = hitR;
+  for (const idx of nearby) {
+    const item = items[idx];
+    if (!isLayerVisible(item)) continue;
+    const [sx, sy] = worldToScreen(item.x, item.y);
+    const d = Math.sqrt((mx - sx) ** 2 + (my - sy) ** 2);
+    if (d < bestDist) { bestDist = d; best = item; }
+  }
+  return best;
+}
+
+function onMouseMove(e) {
+  if (isDragging) {
+    viewX = dragViewX + (e.clientX - dragStartX);
+    viewY = dragViewY + (e.clientY - dragStartY);
+    invalidate();
+    return;
+  }
+
+  mouseScreenX = e.clientX; mouseScreenY = e.clientY;
+  if (spotlightMode) invalidate();
+  hoveredItem = findItemAt(e.clientX, e.clientY);
+  const tt = document.getElementById('tooltip');
+
+  if (hoveredItem) {
+    canvas.style.cursor = 'pointer';
+    const item = hoveredItem;
+
+    if (item.type === 'photo') {
+      tt.querySelector('.tt-title').textContent = (item.captured || '').slice(0, 10);
+      let meta = '';
+      if (item.faces) meta += item.faces;
+      if (item.objects) meta += (meta ? ' | ' : '') + item.objects;
+      tt.querySelector('.tt-meta').textContent = meta;
+      tt.querySelector('.tt-preview').innerHTML = `<img src="${THUMB_BASE}/${item.id}.jpg" crossorigin="anonymous" onerror="this.style.display='none'">`;
+      tt.querySelector('.tt-text').textContent = '';
+    } else {
+      tt.querySelector('.tt-title').textContent = item.title || '';
+      tt.querySelector('.tt-meta').textContent = item.folder || '';
+      tt.querySelector('.tt-preview').innerHTML = '';
+      tt.querySelector('.tt-text').textContent = (item.text || '').slice(0, 150);
+    }
+
+    tt.style.display = 'block';
+    tt.style.left = Math.min(e.clientX + 16, window.innerWidth - 340) + 'px';
+    tt.style.top = Math.max(10, e.clientY - 120) + 'px';
+  } else {
+    canvas.style.cursor = 'grab';
+    tt.style.display = 'none';
+  }
+}
+
+function onClick(e) {
+  if (Math.abs(e.clientX - dragStartX) + Math.abs(e.clientY - dragStartY) > 5) return;
+  const item = findItemAt(e.clientX, e.clientY);
+  if (item) {
+    enterFocus(item);
+  } else {
+    exitFocus();
+  }
+}
+
+function enterFocus(item) {
+  selectedItem = item;
+  focusMode = true;
+
+  // Find neighbors (embedding similarity)
+  const neighbors = getNeighbors(item, 8);
+  focusSet = new Set([item.id, ...neighbors.map(n => n.item.id)]);
+  neighborLines = neighbors.map(n => ({ from: item.id, to: n.item.id }));
+
+  // Temporal cross-modal links: find items of OTHER type on the same date
+  const itemDate = item.type === 'photo'
+    ? (item.captured || '').slice(0, 10)
+    : null; // notes don't have dates in the data yet — match via Daily note filename
+  const dateStr = itemDate || (item.title && item.title.match(/^(\d{8})/)?.[1]
+    ? `${item.title.slice(0,4)}-${item.title.slice(4,6)}-${item.title.slice(6,8)}` : null);
+
+  if (dateStr) {
+    const otherType = item.type === 'photo' ? 'note' : 'photo';
+    const temporalLinks = items.filter(i => {
+      if (i.type !== otherType || i.id === item.id) return false;
+      if (otherType === 'photo') return (i.captured || '').startsWith(dateStr);
+      // Match daily notes by title (YYYYMMDD format) or folder
+      const noteDate = i.title && i.title.match(/^(\d{8})/)?.[1];
+      return noteDate === dateStr.replace(/-/g, '');
+    }).slice(0, 5);
+
+    temporalLinks.forEach(tl => {
+      focusSet.add(tl.id);
+      neighborLines.push({ from: item.id, to: tl.id, temporal: true });
+    });
+  }
+
+  // Add to breadcrumbs
+  const label = item.type === 'photo'
+    ? `📷 ${(item.captured || '').slice(0, 10)}`
+    : `📝 ${(item.title || '').slice(0, 20)}`;
+  breadcrumbs.push({ id: item.id, label });
+  updateBreadcrumbs();
+
+  showDetail(item);
+  showNeighbors(item);
+  document.getElementById('focus-label').style.display = 'block';
+
+  // Pan to item
+  const [sx, sy] = worldToScreen(item.x, item.y);
+  viewX += window.innerWidth / 2 - sx;
+  viewY += window.innerHeight / 2 - sy;
+}
+
+function exitFocus() {
+  focusMode = false;
+  focusSet.clear();
+  breadcrumbs = [];
+  selectedItem = null;
+  neighborLines = [];
+  closeDetail();
+  updateBreadcrumbs();
+  document.getElementById('focus-label').style.display = 'none';
+}
+
+function getNeighbors(item, n) {
+  return items
+    .filter(i => i.id !== item.id)
+    .map(i => ({ item: i, dist: Math.sqrt((i.x - item.x)**2 + (i.y - item.y)**2) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, n);
+}
+
+function updateBreadcrumbs() {
+  const el = document.getElementById('breadcrumbs');
+  el.innerHTML = '';
+  if (breadcrumbs.length === 0) { el.classList.remove('active'); return; }
+  el.classList.add('active');
+
+  breadcrumbs.forEach((bc, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'bc-sep';
+      sep.textContent = '→';
+      el.appendChild(sep);
+    }
+    const span = document.createElement('span');
+    span.className = 'bc-item' + (i === breadcrumbs.length - 1 ? ' current' : '');
+    span.textContent = bc.label;
+    span.addEventListener('click', () => {
+      // Jump back to this breadcrumb
+      breadcrumbs = breadcrumbs.slice(0, i + 1);
+      const target = itemsById.get(bc.id);
+      if (target) enterFocus(target);
+      // Remove the duplicate breadcrumb that enterFocus adds
+      breadcrumbs.pop();
+    });
+    el.appendChild(span);
+  });
+}
+
+function startExplore() {
+  // Pick a random item with high neighbor density
+  const candidates = items.slice().sort(() => Math.random() - 0.5).slice(0, 20);
+  let best = candidates[0], bestDensity = 0;
+  for (const c of candidates) {
+    const neighbors = getNeighbors(c, 5);
+    const avgDist = neighbors.reduce((s, n) => s + n.dist, 0) / 5;
+    const density = 1 / (avgDist + 0.1);
+    if (density > bestDensity) { bestDensity = density; best = c; }
+  }
+  // Zoom to show ~15 unit radius around the item
+  viewScale = Math.min(window.innerWidth, window.innerHeight) / 15;
+  breadcrumbs = [];
+  viewX = window.innerWidth / 2 - best.x * viewScale;
+  viewY = window.innerHeight / 2 + best.y * viewScale;
+  enterFocus(best);
+}
+
+function showDetail(item) {
+  const panel = document.getElementById('detail-panel');
+  const img = document.getElementById('detail-image');
+  const title = document.getElementById('detail-title');
+  const meta = document.getElementById('detail-meta');
+  const text = document.getElementById('detail-text');
+
+  if (item.type === 'photo') {
+    img.src = `${THUMB_BASE}/${item.id}.jpg`;
+    img.style.display = 'block';
+    title.textContent = (item.captured || '').slice(0, 16);
+    let metaStr = '';
+    if (item.faces) metaStr += `Faces: ${item.faces}\n`;
+    if (item.objects) metaStr += `Objects: ${item.objects}\n`;
+    if (item.lat) metaStr += `GPS: ${item.lat.toFixed(3)}, ${item.lon.toFixed(3)}`;
+    meta.textContent = metaStr;
+    text.textContent = '';
+  } else {
+    img.style.display = 'none';
+    title.textContent = item.title || '';
+    meta.textContent = `Folder: ${item.folder || 'root'}`;
+    const raw = (item.text || '').replace(/\[\[([^\]|]+)(\|([^\]]+))?\]\]/g, (_, target, __, alias) => alias || target);
+    if (typeof marked !== 'undefined') {
+      text.innerHTML = marked.parse(raw, { breaks: true, gfm: true });
+    } else {
+      text.textContent = raw;
+    }
+  }
+
+  panel.classList.add('open');
+}
+
+function showNeighbors(item) {
+  // Find 5 nearest by Euclidean distance in UMAP space
+  const distances = items
+    .filter(i => i.id !== item.id)
+    .map(i => ({ item: i, dist: Math.sqrt((i.x - item.x)**2 + (i.y - item.y)**2) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 5);
+
+  neighborLines = distances.map(d => ({ from: item.id, to: d.item.id }));
+
+  const list = document.getElementById('neighbor-list');
+  list.innerHTML = '';
+  distances.forEach(d => {
+    const div = document.createElement('div');
+    div.className = 'neighbor-item';
+    const label = d.item.type === 'photo'
+      ? `📷 ${(d.item.captured || '').slice(0, 10)} ${d.item.objects || ''}`
+      : `📝 ${d.item.title || ''}`;
+    const score = (1 / (1 + d.dist)).toFixed(2);
+    div.innerHTML = `${label} <span class="neighbor-score">${score}</span>`;
+    div.addEventListener('click', () => enterFocus(d.item));
+    list.appendChild(div);
+  });
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+function updateLayerButtons() {
+  document.getElementById('btn-photos').classList.toggle('active', layerMode !== 2);
+  document.getElementById('btn-photos').classList.toggle('off', layerMode === 2);
+  document.getElementById('btn-notes').classList.toggle('active', layerMode !== 1);
+  document.getElementById('btn-notes').classList.toggle('off', layerMode === 1);
+}
+
+function toggleFilter(type) {
+  if (type === 'photos') {
+    layerMode = layerMode === 1 ? 3 : 1;
+  } else {
+    layerMode = layerMode === 2 ? 3 : 2;
+  }
+  updateLayerButtons();
+}
+
+function doSearch(query) {
+  if (!query.trim()) { searchResults = null; return; }
+
+  // Simple client-side search: match against titles, objects, faces, text
+  const q = query.toLowerCase();
+  const matches = new Set();
+
+  items.forEach(item => {
+    const searchable = [
+      item.title || '', item.objects || '', item.faces || '',
+      item.folder || '', (item.text || '').slice(0, 500),
+      (item.captured || '').slice(0, 10),
+    ].join(' ').toLowerCase();
+
+    if (searchable.includes(q)) matches.add(item.id);
+  });
+
+  searchResults = matches.size > 0 ? matches : null;
+
+  if (matches.size > 0) {
+    // Pan to center of matches
+    const matched = items.filter(i => matches.has(i.id));
+    const cx = matched.reduce((s, i) => s + i.x, 0) / matched.length;
+    const cy = matched.reduce((s, i) => s + i.y, 0) / matched.length;
+    const [sx, sy] = worldToScreen(cx, cy);
+    viewX += window.innerWidth / 2 - sx;
+    viewY += window.innerHeight / 2 - sy;
+  }
+}
+
+function surprise() {
+  // Find a random dense cluster
+  const idx = Math.floor(Math.random() * items.length);
+  const item = items[idx];
+  const [sx, sy] = worldToScreen(item.x, item.y);
+  viewX += window.innerWidth / 2 - sx;
+  viewY += window.innerHeight / 2 - sy;
+  viewScale = Math.min(window.innerWidth, window.innerHeight) / 40;
+  selectedItem = item;
+  showDetail(item);
+  showNeighbors(item);
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.97 : 1.03;
+  viewX = e.clientX - (e.clientX - viewX) * factor;
+  viewY = e.clientY - (e.clientY - viewY) * factor;
+  viewScale = Math.max(0.3, Math.min(viewScale * factor, 15));
+  invalidate();
+}
+
+// Arrow key navigation between neighbors
+function navigateArrow(dx, dy) {
+  if (!selectedItem) return;
+  const sx = selectedItem.x, sy = selectedItem.y;
+  const dirLen = Math.sqrt(dx*dx + dy*dy);
+  const ndx = dx / dirLen, ndy = dy / dirLen;
+
+  let best = null, bestScore = -Infinity;
+  for (const item of items) {
+    if (item === selectedItem) continue;
+    if (item.type === 'photo' && !showPhotos) continue;
+    if (item.type === 'note' && !showNotes) continue;
+    if (focusMode && !focusSet.has(item.id)) continue;
+
+    const cdx = item.x - sx, cdy = item.y - sy;
+    const dist = Math.sqrt(cdx*cdx + cdy*cdy);
+    if (dist < 0.01) continue;
+    const dot = (cdx/dist) * ndx + (cdy/dist) * ndy;
+    if (dot < 0.3) continue; // must be roughly in the right direction
+    const score = dot / (1 + dist * 0.1); // prefer close + aligned
+    if (score > bestScore) { bestScore = score; best = item; }
+  }
+
+  if (best) {
+    if (focusMode) {
+      enterFocus(best);
+    } else {
+      selectedItem = best;
+      showDetail(best);
+      showNeighbors(best);
+    }
+    // Pan to center
+    const [bsx, bsy] = worldToScreen(best.x, best.y);
+    viewX += window.innerWidth / 2 - bsx;
+    viewY += window.innerHeight / 2 - bsy;
+  }
+}
+
+// Temporal cross-modal links: connect photos to same-day notes
+function getTemporalLinks(item) {
+  const links = [];
+  let itemDate = '';
+  if (item.type === 'photo') {
+    itemDate = (item.captured || '').slice(0, 10);
+  } else if (item.type === 'note') {
+    // Notes: check title for date pattern YYYYMMDD or YYYY-MM-DD
+    const title = item.title || item.id || '';
+    const m = title.match(/(\d{4})-?(\d{2})-?(\d{2})/);
+    if (m) itemDate = `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  if (!itemDate) return links;
+
+  for (const other of items) {
+    if (other === item) continue;
+    // Cross-modal only
+    if (other.type === item.type) continue;
+
+    let otherDate = '';
+    if (other.type === 'photo') {
+      otherDate = (other.captured || '').slice(0, 10);
+    } else {
+      const title = other.title || other.id || '';
+      const m = title.match(/(\d{4})-?(\d{2})-?(\d{2})/);
+      if (m) otherDate = `${m[1]}-${m[2]}-${m[3]}`;
+    }
+
+    if (otherDate === itemDate) {
+      links.push({ from: item.id, to: other.id });
+    }
+  }
+  return links.slice(0, 20); // cap at 20
+}
+
+
+function buildSettings() {
+  // Presets
+  const grid = document.getElementById('emb-presets');
+  Object.keys(EMPRESETS).forEach(name => {
+    const btn = document.createElement('div');
+    btn.className = 'preset-btn';
+    btn.textContent = name;
+    btn.onclick = () => {
+      Object.assign(SP, EMPRESETS[name]);
+      updateSettingsUI();
+      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    };
+    grid.appendChild(btn);
+  });
+
+  // Sliders
+  const container = document.getElementById('emb-sliders');
+  const params = [
+    ['spacing', 'Spacing', 0.3, 3, 0.1],
+    ['photoSize', 'Photo Size', 0.3, 2, 0.1],
+    ['noteSize', 'Note Size', 0.3, 2, 0.1],
+    ['spotlightRadius', 'Spotlight Radius', 50, 400, 10],
+    ['maxLabels', 'Max Labels', 5, 50, 1],
+  ];
+  params.forEach(([key, label, min, max, step]) => {
+    const row = document.createElement('div');
+    row.className = 's-row';
+    row.innerHTML = `<div class="s-label"><span>${label}</span><span class="val" id="sv-${key}">${SP[key]}</span></div><input type="range" min="${min}" max="${max}" step="${step}" value="${SP[key]}" id="ss-${key}">`;
+    row.querySelector('input').oninput = function() {
+      SP[key] = parseFloat(this.value);
+      document.getElementById('sv-' + key).textContent = SP[key];
+    };
+    container.appendChild(row);
+  });
+
+  // Face filters
+  buildFaceFilters();
+}
+
+function updateSettingsUI() {
+  Object.keys(SP).forEach(key => {
+    const slider = document.getElementById('ss-' + key);
+    const val = document.getElementById('sv-' + key);
+    if (slider) slider.value = SP[key];
+    if (val) val.textContent = SP[key];
+  });
+}
+
+function buildFaceFilters() {
+  const container = document.getElementById('face-filters');
+  const faceCounts = {};
+  items.forEach(i => {
+    if (i.faces) i.faces.split(',').filter(Boolean).forEach(f => {
+      faceCounts[f] = (faceCounts[f] || 0) + 1;
+    });
+  });
+  const sorted = Object.entries(faceCounts).sort((a,b) => b[1] - a[1]);
+  sorted.forEach(([name, count]) => {
+    const btn = document.createElement('div');
+    btn.className = 'face-btn';
+    btn.textContent = `${name} (${count})`;
+    btn.onclick = () => {
+      if (faceFilter === name) {
+        faceFilter = null;
+        btn.classList.remove('active');
+        document.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
+      } else {
+        faceFilter = name;
+        document.querySelectorAll('.face-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      }
+    };
+    container.appendChild(btn);
+  });
+}
+
+function toggleSettings() {
+  settingsOpen = !settingsOpen;
+  document.getElementById('settings-panel').classList.toggle('open', settingsOpen);
+}
+
+function toggleDateSlider() {
+  dateFilterActive = !dateFilterActive;
+  document.getElementById('date-slider-container').style.display = dateFilterActive ? 'flex' : 'none';
+  document.getElementById('btn-date').classList.toggle('active', dateFilterActive);
+}
+
+// Date slider handler
+document.getElementById('date-slider').addEventListener('input', function() {
+  dateFilterValue = parseFloat(this.value);
+  const year = Math.floor(dateFilterValue);
+  const month = Math.round((dateFilterValue - year) * 12) + 1;
+  document.getElementById('date-label').textContent = year + '-' + String(month).padStart(2, '0');
+});
+
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Absence Map — The Gaps Between</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #040407; color: #fff; font-family: -apple-system, sans-serif; overflow: auto; }
+
+#container { padding: 40px 20px; }
+h1 { font-size: 16px; color: #555; font-weight: 400; text-align: center; margin-bottom: 6px; letter-spacing: 1px; }
+#subtitle { font-size: 11px; color: #333; text-align: center; margin-bottom: 30px; }
+
+.year-row { display: flex; align-items: center; margin-bottom: 3px; }
+.year-label { width: 44px; font-size: 11px; color: #444; text-align: right; padding-right: 10px; flex-shrink: 0; }
+.days { display: flex; gap: 1px; flex-wrap: nowrap; }
+.day {
+  width: 5px; height: 18px; border-radius: 1px; cursor: pointer;
+  transition: transform 0.15s;
+}
+.day:hover { transform: scaleY(1.6) scaleX(2.5); z-index: 10; position: relative; }
+.day.streak { border-bottom: 2px solid rgba(239,68,68,0.6); }
+
+#tooltip {
+  position: fixed; display: none; z-index: 200;
+  background: rgba(10,10,20,0.95); border: 1px solid #333;
+  padding: 10px 14px; border-radius: 8px; pointer-events: none;
+  font-size: 12px; line-height: 1.6; backdrop-filter: blur(8px);
+  max-width: 320px;
+}
+.tt-date { color: #ccc; font-size: 13px; }
+.tt-status { font-size: 12px; }
+.tt-context { color: #555; font-size: 11px; margin-top: 4px; }
+
+#legend {
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px; margin-top: 20px; font-size: 10px; color: #444;
+}
+.legend-cell { width: 14px; height: 14px; border-radius: 2px; }
+
+#monthly-chart {
+  margin: 30px auto 0; max-width: 900px;
+  display: flex; align-items: flex-end; gap: 2px; height: 100px;
+  border-bottom: 1px solid #1a1a2e; padding-bottom: 4px;
+}
+.month-bar {
+  flex: 1; background: rgba(239,68,68,0.3); border-radius: 2px 2px 0 0;
+  cursor: pointer; transition: background 0.2s; position: relative;
+  min-width: 4px;
+}
+.month-bar:hover { background: rgba(239,68,68,0.6); }
+.month-label {
+  position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+  font-size: 8px; color: #333; white-space: nowrap;
+}
+
+#stats {
+  text-align: center; margin-top: 30px; font-size: 12px; color: #333;
+  line-height: 2;
+}
+#stats span { color: #ef4444; }
+
+#back { position: fixed; top: 16px; left: 16px; z-index: 100; }
+#back a { color: #444; text-decoration: none; font-size: 12px; }
+#back a:hover { color: #f59e0b; }
+</style>
+</head>
+<body>
+
+<div id="back"><a href="/">&larr; Explorer</a></div>
+
+<div id="tooltip">
+  <div class="tt-date"></div>
+  <div class="tt-status"></div>
+  <div class="tt-context"></div>
+</div>
+
+<div id="container">
+  <h1>ABSENCE MAP</h1>
+  <div id="subtitle">The gaps in your photographic record — bright = silence, dark = captured</div>
+  <div id="calendar"></div>
+  <div id="legend"></div>
+  <div id="monthly-chart"></div>
+  <div id="stats"></div>
+</div>
+
+<script>
+async function init() {
+  const resp = await fetch('calendar_data.json');
+  const rawData = await resp.json();
+
+  // Index by date
+  const byDate = {};
+  rawData.forEach(d => { byDate[d.d] = d; });
+
+  // Build full date range and identify streaks
+  const startYear = 2016; // skip sparse early years
+  const endYear = 2025;
+  const allDates = [];
+  for (let y = startYear; y <= endYear; y++) {
+    const s = new Date(y, 0, 1);
+    const e = new Date(y + 1, 0, 1);
+    for (let d = new Date(s); d < e; d.setDate(d.getDate() + 1)) {
+      const ds = d.toISOString().slice(0, 10);
+      const entry = byDate[ds];
+      const count = entry ? entry.n : 0;
+      allDates.push({ date: ds, count, entry });
+    }
+  }
+
+  // Identify streaks of zero-photo days (3+ consecutive)
+  const streaks = [];
+  let streakStart = -1;
+  for (let i = 0; i < allDates.length; i++) {
+    if (allDates[i].count === 0) {
+      if (streakStart < 0) streakStart = i;
+    } else {
+      if (streakStart >= 0) {
+        const len = i - streakStart;
+        if (len >= 3) {
+          streaks.push({ start: streakStart, end: i - 1, length: len });
+        }
+        streakStart = -1;
+      }
+    }
+  }
+  if (streakStart >= 0) {
+    const len = allDates.length - streakStart;
+    if (len >= 3) streaks.push({ start: streakStart, end: allDates.length - 1, length: len });
+  }
+
+  // Mark streak membership
+  const inStreak = new Set();
+  streaks.forEach(s => {
+    for (let i = s.start; i <= s.end; i++) inStreak.add(i);
+  });
+
+  // Color functions — INVERTED: bright = absent, dark = present
+  function getColor(count) {
+    if (count === 0) return '#c8a0f0'; // bright lilac/purple glow for absence
+    const t = Math.min(count / 20, 1);
+    // Fade from dim to very dark as count increases
+    const r = Math.round(20 - t * 16);
+    const g = Math.round(20 - t * 16);
+    const b = Math.round(30 - t * 22);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function getStreakColor() {
+    return '#ef4444'; // red for streaks
+  }
+
+  // Build calendar
+  const calEl = document.getElementById('calendar');
+  let globalIdx = 0;
+
+  for (let year = startYear; year <= endYear; year++) {
+    const row = document.createElement('div');
+    row.className = 'year-row';
+
+    const label = document.createElement('div');
+    label.className = 'year-label';
+    label.textContent = year;
+    row.appendChild(label);
+
+    const daysContainer = document.createElement('div');
+    daysContainer.className = 'days';
+
+    const s = new Date(year, 0, 1);
+    const e = new Date(year + 1, 0, 1);
+    for (let d = new Date(s); d < e; d.setDate(d.getDate() + 1)) {
+      const ds = d.toISOString().slice(0, 10);
+      const dayData = allDates[globalIdx];
+      const count = dayData ? dayData.count : 0;
+      const isInStreak = inStreak.has(globalIdx);
+      const idx = globalIdx;
+
+      const cell = document.createElement('div');
+      cell.className = 'day' + (isInStreak ? ' streak' : '');
+
+      if (count === 0 && isInStreak) {
+        cell.style.backgroundColor = getStreakColor();
+        cell.style.boxShadow = '0 0 4px rgba(239,68,68,0.3)';
+      } else if (count === 0) {
+        cell.style.backgroundColor = getColor(0);
+        cell.style.boxShadow = '0 0 3px rgba(200,160,240,0.15)';
+      } else {
+        cell.style.backgroundColor = getColor(count);
+      }
+
+      // Tooltip
+      const cellDate = ds;
+      const cellCount = count;
+      cell.addEventListener('mouseenter', (ev) => {
+        const tt = document.getElementById('tooltip');
+        const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const dow = new Date(cellDate).getDay();
+        tt.querySelector('.tt-date').textContent = `${weekdays[dow]} ${cellDate}`;
+
+        if (cellCount === 0) {
+          // Find which streak this belongs to
+          const streak = streaks.find(s => idx >= s.start && idx <= s.end);
+          if (streak) {
+            tt.querySelector('.tt-status').innerHTML =
+              `<span style="color:#ef4444">Day ${idx - streak.start + 1} of ${streak.length}-day silence</span>`;
+            tt.querySelector('.tt-status').innerHTML +=
+              `<br><span style="color:#ef4444">${allDates[streak.start].date} \u2192 ${allDates[streak.end].date}</span>`;
+          } else {
+            tt.querySelector('.tt-status').innerHTML = '<span style="color:#c8a0f0">No photos</span>';
+          }
+
+          // Context: what came before and after
+          let before = '', after = '';
+          for (let j = idx - 1; j >= Math.max(0, idx - 7); j--) {
+            if (allDates[j].count > 0) {
+              before = `Before: ${allDates[j].count} photos on ${allDates[j].date}`;
+              if (allDates[j].entry && allDates[j].entry.f && allDates[j].entry.f.length) {
+                before += ` (${allDates[j].entry.f.join(', ')})`;
+              }
+              break;
+            }
+          }
+          for (let j = idx + 1; j < Math.min(allDates.length, idx + 7); j++) {
+            if (allDates[j].count > 0) {
+              after = `After: ${allDates[j].count} photos on ${allDates[j].date}`;
+              if (allDates[j].entry && allDates[j].entry.f && allDates[j].entry.f.length) {
+                after += ` (${allDates[j].entry.f.join(', ')})`;
+              }
+              break;
+            }
+          }
+          tt.querySelector('.tt-context').textContent = [before, after].filter(Boolean).join(' \u00b7 ');
+        } else {
+          tt.querySelector('.tt-status').innerHTML = `<span style="color:#333">${cellCount} photos (captured)</span>`;
+          tt.querySelector('.tt-context').textContent = '';
+        }
+
+        tt.style.display = 'block';
+        tt.style.left = Math.min(ev.clientX + 12, window.innerWidth - 340) + 'px';
+        tt.style.top = Math.max(10, ev.clientY - 100) + 'px';
+      });
+
+      cell.addEventListener('mouseleave', () => {
+        document.getElementById('tooltip').style.display = 'none';
+      });
+
+      daysContainer.appendChild(cell);
+      globalIdx++;
+    }
+
+    row.appendChild(daysContainer);
+    calEl.appendChild(row);
+  }
+
+  // Legend
+  const legendEl = document.getElementById('legend');
+  legendEl.innerHTML = `
+    <div class="legend-cell" style="background:#ef4444;box-shadow:0 0 4px rgba(239,68,68,0.3)"></div><span>3+ day silence</span>
+    <div class="legend-cell" style="background:#c8a0f0;box-shadow:0 0 3px rgba(200,160,240,0.15)"></div><span>1-2 day gap</span>
+    <div class="legend-cell" style="background:#141418"></div><span>Active (1-5)</span>
+    <div class="legend-cell" style="background:#060608"></div><span>Active (20+)</span>
+  `;
+
+  // Monthly absence chart
+  const monthlyChart = document.getElementById('monthly-chart');
+  const monthCounts = {};
+  allDates.forEach(d => {
+    const m = d.date.slice(0, 7);
+    if (!monthCounts[m]) monthCounts[m] = { total: 0, absent: 0 };
+    monthCounts[m].total++;
+    if (d.count === 0) monthCounts[m].absent++;
+  });
+
+  const maxAbsent = Math.max(...Object.values(monthCounts).map(m => m.absent));
+  const months = Object.keys(monthCounts).sort();
+
+  months.forEach(m => {
+    const mc = monthCounts[m];
+    const bar = document.createElement('div');
+    bar.className = 'month-bar';
+    const h = (mc.absent / maxAbsent) * 90;
+    bar.style.height = Math.max(h, 1) + 'px';
+
+    // Color intensity by absence ratio
+    const ratio = mc.absent / mc.total;
+    if (ratio > 0.7) bar.style.background = 'rgba(239,68,68,0.6)';
+    else if (ratio > 0.4) bar.style.background = 'rgba(239,68,68,0.35)';
+
+    // Show year labels
+    if (m.endsWith('-01')) {
+      const lbl = document.createElement('div');
+      lbl.className = 'month-label';
+      lbl.textContent = m.slice(0, 4);
+      bar.appendChild(lbl);
+    }
+
+    bar.title = `${m}: ${mc.absent}/${mc.total} days absent (${Math.round(ratio * 100)}%)`;
+    monthlyChart.appendChild(bar);
+  });
+
+  // Stats
+  const totalDays = allDates.length;
+  const absentDays = allDates.filter(d => d.count === 0).length;
+  const totalStreakDays = streaks.reduce((s, st) => s + st.length, 0);
+  const longestStreak = streaks.length > 0 ? Math.max(...streaks.map(s => s.length)) : 0;
+  const longestStreakData = streaks.find(s => s.length === longestStreak);
+
+  document.getElementById('stats').innerHTML = `
+    <span>${absentDays}</span> days with no photos out of ${totalDays} (${Math.round(absentDays/totalDays*100)}%) &middot;
+    <span>${streaks.length}</span> silence streaks of 3+ days &middot;
+    <span>${totalStreakDays}</span> days in extended silence &middot;
+    Longest: <span>${longestStreak} days</span>${longestStreakData ? ` (${allDates[longestStreakData.start].date} \u2192 ${allDates[longestStreakData.end].date})` : ''}
+  `;
+}
+
+init();
+</script>
+</body>
+</html>

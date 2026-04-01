@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Calendar Wall — 20 Years of Photos</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #040407; color: #fff; font-family: -apple-system, sans-serif; overflow: auto; }
+
+#container { padding: 40px 20px; }
+h1 { font-size: 16px; color: #555; font-weight: 400; text-align: center; margin-bottom: 8px; letter-spacing: 1px; }
+#subtitle { font-size: 11px; color: #333; text-align: center; margin-bottom: 30px; }
+
+.year-row { display: flex; align-items: center; margin-bottom: 3px; }
+.year-label {
+  width: 44px; font-size: 11px; color: #444;
+  text-align: right; padding-right: 10px; flex-shrink: 0;
+}
+.days { display: flex; gap: 1px; flex-wrap: nowrap; }
+.day {
+  width: 5px; height: 18px; border-radius: 1px; cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  background-size: cover; background-position: center;
+}
+.day:hover { transform: scale(6); z-index: 10; position: relative; border-radius: 2px; }
+
+#tooltip {
+  position: fixed; display: none; z-index: 200;
+  background: rgba(10,10,20,0.95); border: 1px solid #333;
+  padding: 10px 14px; border-radius: 8px; pointer-events: none;
+  font-size: 12px; line-height: 1.6; backdrop-filter: blur(8px);
+  max-width: 320px;
+}
+.tt-date { color: #ccc; font-size: 13px; }
+.tt-count { color: #f59e0b; }
+.tt-faces { color: #10b981; font-size: 11px; }
+.tt-radius { color: #3b82f6; font-size: 11px; }
+.tt-thumbs { display: flex; gap: 3px; margin-top: 6px; }
+.tt-thumbs img { width: 40px; height: 40px; object-fit: cover; border-radius: 3px; }
+
+#legend {
+  display: flex; align-items: center; justify-content: center;
+  gap: 3px; margin-top: 20px; font-size: 10px; color: #444;
+}
+.legend-cell { width: 14px; height: 14px; border-radius: 2px; }
+
+#day-detail {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(4,4,7,0.95); border-top: 1px solid #222;
+  padding: 16px; display: none; z-index: 100;
+  max-height: 40vh; overflow-y: auto;
+}
+#day-detail.active { display: block; }
+#day-detail-header { font-size: 13px; color: #888; margin-bottom: 10px; }
+#day-detail-photos { display: flex; gap: 6px; flex-wrap: wrap; }
+#day-detail-photos img {
+  height: 80px; border-radius: 4px; cursor: pointer;
+  opacity: 0.85; transition: opacity 0.2s;
+}
+#day-detail-photos img:hover { opacity: 1; }
+#day-detail-close {
+  position: absolute; top: 12px; right: 16px;
+  color: #444; cursor: pointer; font-size: 18px;
+}
+
+#back { position: fixed; top: 16px; left: 16px; z-index: 100; }
+#back a { color: #444; text-decoration: none; font-size: 12px; }
+#back a:hover { color: #f59e0b; }
+</style>
+</head>
+<body>
+
+<div id="back"><a href="/">&larr; Explorer</a></div>
+
+<div id="tooltip">
+  <div class="tt-date"></div>
+  <div class="tt-count"></div>
+  <div class="tt-faces"></div>
+  <div class="tt-radius"></div>
+  <div class="tt-thumbs"></div>
+</div>
+
+<div id="container">
+  <h1>CALENDAR WALL</h1>
+  <div id="subtitle">Every day from 2005 to 2025 — color = photo density</div>
+  <div id="calendar"></div>
+  <div id="legend"></div>
+</div>
+
+<div id="day-detail">
+  <div id="day-detail-close" onclick="document.getElementById('day-detail').classList.remove('active')">&times;</div>
+  <div id="day-detail-header"></div>
+  <div id="day-detail-photos"></div>
+</div>
+
+<script>
+const THUMB_BASE = `http://${location.hostname}:8080`;
+const CLAMP = 30; // photos at full brightness
+
+// Cache replay data for thumbnails
+let replayData = null;
+async function getReplayData() {
+  if (!replayData) {
+    const resp = await fetch('replay_data.json');
+    replayData = await resp.json();
+  }
+  return replayData;
+}
+
+function getColor(count) {
+  if (count === 0) return '#111118'; // subtle dark gray for empty days
+  const t = Math.min(count / CLAMP, 1); // clamp at 30
+  const r = Math.round(17 + t * 228);  // 17 → 245
+  const g = Math.round(17 + t * 141);  // 17 → 158
+  const b = Math.round(24 + t * 0);    // stays dark
+  return `rgb(${r},${g},${b})`;
+}
+
+async function init() {
+  const resp = await fetch('calendar_data.json');
+  const data = await resp.json();
+
+  const byDate = {};
+  data.forEach(d => { byDate[d.d] = d; });
+
+  const calEl = document.getElementById('calendar');
+
+  for (let year = 2005; year <= 2025; year++) {
+    const row = document.createElement('div');
+    row.className = 'year-row';
+
+    const label = document.createElement('div');
+    label.className = 'year-label';
+    label.textContent = year;
+    row.appendChild(label);
+
+    const daysContainer = document.createElement('div');
+    daysContainer.className = 'days';
+
+    const start = new Date(year, 0, 1);
+    const end = new Date(year + 1, 0, 1);
+    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().slice(0, 10);
+      const entry = byDate[dateStr];
+      const count = entry ? entry.n : 0;
+
+      const cell = document.createElement('div');
+      cell.className = 'day';
+      cell.style.backgroundColor = getColor(count);
+
+      // Lazy-load representative thumbnail as background
+      if (entry && entry.id && count > 0) {
+        cell.dataset.thumbId = entry.id;
+      }
+
+      // Glow for high-engagement days
+      if (count > 50) {
+        cell.style.boxShadow = `0 0 6px rgba(245,158,11,${Math.min(count/100, 0.6)})`;
+      }
+
+      // Hover: show tooltip with thumbnail previews
+      const cellDate = dateStr; // capture for closure
+      const cellCount = count;
+      const cellEntry = entry;
+
+      cell.addEventListener('mouseenter', async (e) => {
+        const tt = document.getElementById('tooltip');
+        const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+        const dayOfWeek = new Date(cellDate).getDay();
+        tt.querySelector('.tt-date').textContent = `${weekdays[dayOfWeek]} ${cellDate}`;
+        tt.querySelector('.tt-count').textContent = cellCount > 0 ? `${cellCount} photos` : 'No photos';
+        tt.querySelector('.tt-faces').textContent = cellEntry && cellEntry.f.length ? cellEntry.f.join(', ') : '';
+        tt.querySelector('.tt-radius').textContent = cellEntry && cellEntry.r > 0 ? `${cellEntry.r}km from home` : '';
+
+        // Load thumbnail previews
+        const thumbsEl = tt.querySelector('.tt-thumbs');
+        thumbsEl.innerHTML = '';
+        if (cellCount > 0) {
+          try {
+            const all = await getReplayData();
+            const dayPhotos = all.filter(p => p.t && p.t.startsWith(cellDate));
+            dayPhotos.slice(0, 4).forEach(p => {
+              const img = document.createElement('img');
+              img.src = `${THUMB_BASE}/${p.id}.jpg`;
+              img.crossOrigin = 'anonymous';
+              img.onerror = () => img.style.display = 'none';
+              thumbsEl.appendChild(img);
+            });
+          } catch(e) {}
+        }
+
+        tt.style.display = 'block';
+        tt.style.left = Math.min(e.clientX + 12, window.innerWidth - 340) + 'px';
+        tt.style.top = Math.max(10, e.clientY - 120) + 'px';
+      });
+
+      cell.addEventListener('mouseleave', () => {
+        document.getElementById('tooltip').style.display = 'none';
+      });
+
+      cell.dataset.date = cellDate;
+      cell.addEventListener('click', () => showDayDetail(cellDate, cellCount));
+
+      daysContainer.appendChild(cell);
+    }
+
+    row.appendChild(daysContainer);
+    calEl.appendChild(row);
+  }
+
+  // Lazy-load thumbnails via IntersectionObserver
+  const thumbObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const cell = entry.target;
+        const id = cell.dataset.thumbId;
+        if (id && !cell.dataset.loaded) {
+          cell.dataset.loaded = '1';
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            cell.style.backgroundImage = `url(${THUMB_BASE}/${id}.jpg)`;
+            cell.style.backgroundColor = ''; // remove color overlay
+          };
+          img.src = `${THUMB_BASE}/${id}.jpg`;
+        }
+        thumbObserver.unobserve(cell);
+      }
+    });
+  }, { rootMargin: '100px' });
+
+  document.querySelectorAll('.day[data-thumb-id]').forEach(cell => {
+    thumbObserver.observe(cell);
+  });
+
+  // Legend
+  const legendEl = document.getElementById('legend');
+  legendEl.innerHTML = '<span>0</span>';
+  const steps = [0, 1, 3, 5, 10, 15, 20, 30, 50];
+  steps.forEach(n => {
+    const cell = document.createElement('div');
+    cell.className = 'legend-cell';
+    cell.style.backgroundColor = getColor(n);
+    cell.title = `${n} photos`;
+    legendEl.appendChild(cell);
+  });
+  legendEl.innerHTML += '<span>30+</span>';
+}
+
+async function showDayDetail(dateStr, count) {
+  if (count === 0) return;
+
+  document.getElementById('day-detail-header').textContent = `${dateStr} \u2014 ${count} photos`;
+  const photosEl = document.getElementById('day-detail-photos');
+  photosEl.innerHTML = 'Loading...';
+
+  try {
+    const all = await getReplayData();
+    const dayPhotos = all.filter(p => p.t && p.t.startsWith(dateStr));
+
+    photosEl.innerHTML = '';
+    dayPhotos.slice(0, 30).forEach(p => {
+      const img = document.createElement('img');
+      img.src = `${THUMB_BASE}/${p.id}.jpg`;
+      img.crossOrigin = 'anonymous';
+      img.onerror = () => img.style.display = 'none';
+      photosEl.appendChild(img);
+    });
+
+    if (dayPhotos.length === 0) {
+      photosEl.innerHTML = '<span style="color:#555">No thumbnails available</span>';
+    }
+  } catch(e) {
+    photosEl.innerHTML = '<span style="color:#555">Could not load photos</span>';
+  }
+
+  document.getElementById('day-detail').classList.add('active');
+}
+
+init();
+</script>
+</body>
+</html>
