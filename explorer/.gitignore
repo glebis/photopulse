@@ -1,0 +1,25 @@
+# Secrets
+*.env
+api_key
+secrets.yaml.dec
+
+# Data (too large for git)
+embeddings_2d.json
+embeddings_summary.json
+calendar_data.json
+ekg_data.json
+replay_data.json
+layouts.json
+photos.json
+fold_data.json
+
+# ChromaDB
+chroma_db/
+chroma_snapshot/
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
